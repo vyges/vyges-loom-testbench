@@ -42,7 +42,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json, os, urllib.request, urllib.error
           url = "https://models.github.ai/inference/chat/completions"
           body = {"model": "openai/gpt-4o-mini", "max_tokens": 5, "temperature": 0,
                   "messages": [{"role": "user", "content": "reply with the word ok"}]}
@@ -51,10 +51,20 @@ jobs:
               headers={"content-type": "application/json",
                        "authorization": "Bearer " + os.environ["GITHUB_TOKEN"]},
               method="POST")
-          with urllib.request.urlopen(req, timeout=60) as r:
-              data = json.loads(r.read())
-          reply = data["choices"][0]["message"]["content"]
-          print("GitHub Models reachable — model replied:", repr(reply))
+          summary = []
+          try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  data = json.loads(r.read())
+              reply = data["choices"][0]["message"]["content"]
+              print("GitHub Models reachable — reply:", repr(reply))
+              summary.append(f"reachable — reply: `{reply}`")
+              ok = True
+          except urllib.error.HTTPError as e:
+              detail = e.read().decode(errors="replace")[:600]
+              print(f"HTTP {e.code} {e.reason}\n{detail}")
+              summary.append(f"**HTTP {e.code} {e.reason}** — {detail}")
+              ok = False
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-              f.write(f"\n### GitHub Models\nreachable — reply: `{reply}`\n")
+              f.write("\n### GitHub Models\n" + "\n".join(summary) + "\n")
+          raise SystemExit(0 if ok else 1)
           PY
