@@ -37,8 +37,13 @@ jobs:
         run: |
           python3 conformance.py cases.json --driver echo --report report-echo.json | tee out.txt
           { echo '## Deterministic (echo)'; echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Render a real chip for the dashboard (best-effort)
+        continue-on-error: true
+        run: vyges-gds-view render fixtures/drc/edge_sensor_glue.gds --top edge_sensor_glue --png --width 760 -o chip.png
       - uses: actions/upload-artifact@v4
         with: { name: report-echo, path: report-echo.json }
+      - uses: actions/upload-artifact@v4
+        with: { name: chip, path: chip.png, if-no-files-found: ignore }
 
   agentic:
     runs-on: ubuntu-latest
@@ -77,7 +82,7 @@ jobs:
         with: { path: reports, merge-multiple: true }
       - name: Render the dashboard
         run: |
-          python3 render_report.py --out site \
+          python3 render_report.py --out site --chip reports/chip.png \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             reports/report-echo.json reports/report-agentic.json
       - uses: actions/configure-pages@v5

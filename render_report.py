@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--out", default="site")
     ap.add_argument("--cases", default="cases.json")
     ap.add_argument("--assets", default="assets")
+    ap.add_argument("--chip", default="", help="optional real-chip PNG to embed (copied into the site)")
     ap.add_argument("--commit", default=os.environ.get("GITHUB_SHA", "")[:7])
     ap.add_argument("--run-url", default="")
     ap.add_argument("reports", nargs="+")
@@ -71,6 +72,14 @@ def main():
                 names.append(c["name"])
     by_name = [{c["name"]: c for c in r.get("cases", [])} for r in reports]
     generated = reports[0].get("generated_at", "") if reports else ""
+
+    chip_html = ""
+    if args.chip and os.path.isfile(args.chip):
+        chip_html = (
+            "<div class='chip'><img src='chip.png' alt='real chip layout'>"
+            "<div class='cap'>A <b>real taped-out sky130 block</b> (edge-sensor SoC glue), rendered by "
+            "<code>vyges gds-view</code> — the AI signs off blocks like this below.</div></div>"
+        )
 
     agent = next((r for r in reports if r.get("driver") != "echo"), None)
     agent_line = ""
@@ -136,6 +145,9 @@ def main():
   td.fail {{ color: #c1121f; font-weight: 700; }}
   td.skip {{ color: #999; }}  td.na {{ color: #bbb; }}
   footer {{ color: #888; font-size: .82rem; margin-top: 1rem; }}
+  .chip {{ text-align: center; margin: 1.2rem 0; }}
+  .chip img {{ max-width: 100%; border-radius: 8px; border: 1px solid #8884; }}
+  .chip .cap {{ color: #888; font-size: .82rem; margin-top: .4rem; }}
   .cta {{ margin-top: 2rem; padding: .9rem 1rem; background: #2f6df618; border: 1px solid #2f6df655;
          border-radius: 8px; font-size: .92rem; }}
   a {{ color: #2563eb; }}
@@ -154,6 +166,7 @@ def main():
   tools. It gets it right purely by reading each engine's self-description at runtime.
 </div>
 <div class="callout">{agent_line}</div>
+{chip_html}
 <table>
   <thead><tr><th class="rowh">Engine · task · input</th>{headers}</tr></thead>
   <tbody>
@@ -179,6 +192,9 @@ def main():
         if os.path.exists(src):
             with open(src, "rb") as s, open(os.path.join(args.out, asset), "wb") as d:
                 d.write(s.read())
+    if args.chip and os.path.isfile(args.chip):  # copy the rendered real-chip PNG in
+        with open(args.chip, "rb") as s, open(os.path.join(args.out, "chip.png"), "wb") as d:
+            d.write(s.read())
     with open(os.path.join(args.out, "index.html"), "w") as f:
         f.write(doc)
     print(f"wrote {os.path.join(args.out, 'index.html')} ({len(names)} engines, {len(reports)} columns)")
