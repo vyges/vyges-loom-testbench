@@ -16,6 +16,7 @@ import http.server
 import json
 import os
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -24,7 +25,9 @@ import webbrowser
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from conformance import DRIVERS, McpServer, run_checks  # noqa: E402
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(REPO_ROOT, "assets")
+HERO = {"png": None}  # a rendered real-chip thumbnail (PNG bytes), when available
 
 
 # tool -> (emoji, human title, headline(result)->str) for a demo-friendly one-liner
@@ -57,6 +60,39 @@ def load_cases(path):
         doc = json.load(f)
     defaults = doc.get("defaults", {})
     return [{**defaults, **c} for c in doc.get("cases", [])]
+
+
+def _gds_view_bin():
+    """Resolve the gds-view engine without relying on PATH (next to VYGES_BIN, in
+    ~/.vyges/bin, or on PATH)."""
+    import shutil
+    cands = []
+    vb = os.environ.get("VYGES_BIN")
+    if vb:
+        cands.append(os.path.join(os.path.dirname(vb), "vyges-gds-view"))
+    cands.append(os.path.expanduser("~/.vyges/bin/vyges-gds-view"))
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return shutil.which("vyges-gds-view") or "vyges-gds-view"
+
+
+def render_hero():
+    """Render the bundled real taped-out block to a PNG thumbnail (needs a gds-view
+    with raster support). Best-effort — the demo runs fine without it."""
+    gds = os.path.join(REPO_ROOT, "fixtures", "drc", "edge_sensor_glue.gds")
+    if not os.path.isfile(gds):
+        return
+    try:
+        r = subprocess.run(
+            [_gds_view_bin(), "render", gds, "--top", "edge_sensor_glue", "--png", "--width", "760"],
+            capture_output=True, timeout=40,
+        )
+        if r.returncode == 0 and r.stdout[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10]):
+            with LOCK:
+                HERO["png"] = r.stdout
+    except Exception:
+        pass
 
 
 def set_status(i, status, **kw):
@@ -133,6 +169,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body.encode())
 
     def do_GET(self):
+        if self.path.startswith("/hero.png"):
+            with LOCK:
+                png = HERO["png"]
+            if png:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(png)
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
         if self.path.startswith("/assets/"):
             self._send_asset(os.path.basename(self.path))
         elif self.path.startswith("/state"):
@@ -178,6 +227,9 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   .sub{ color:#9fb0c8; font-size:.95rem; }
   .explain{ max-width:720px; margin:.9rem auto 0; color:#93a2ba; font-size:.88rem; line-height:1.5; text-align:left; }
   .bot{ font-weight:700; color:#7bd88f; }
+  #hero{ max-width:600px; margin:1.2rem auto .2rem; text-align:center; }
+  #hero img{ max-width:100%; border-radius:10px; border:1px solid #232c3d; box-shadow:0 6px 34px #0009; }
+  #hero .cap{ color:#93a2ba; font-size:.85rem; margin-top:.55rem; }
   .bar{ max-width:900px; margin:1rem auto .4rem; height:8px; border-radius:99px; background:#1c2536; overflow:hidden; }
   .bar > i{ display:block; height:100%; width:0; background:linear-gradient(90deg,#4f8cff,#7bd88f); transition:width .4s ease; }
   .count{ text-align:center; color:#9fb0c8; font-size:.9rem; margin-bottom:1rem; }
@@ -232,6 +284,10 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   <br><br>The model is a <b>stock, general-purpose LLM</b> — no fine-tuning, no training on these tools.
   It gets it right purely by reading each engine's self-description at runtime.</p>
 </header>
+<div id="hero" style="display:none">
+  <img id="heroimg" alt="real chip layout">
+  <div class="cap">☝ A <b>real taped-out sky130 block</b> (edge-sensor SoC glue) — rendered by <code>vyges gds-view</code>. The AI signs it off, live, below.</div>
+</div>
 <div class="bar"><i id="fill"></i></div>
 <div class="count" id="count">connecting…</div>
 <div class="done-banner" id="banner"></div>
@@ -291,6 +347,14 @@ async function tick(){
   }catch(e){}
 }
 setInterval(tick, 350); tick();
+let heroTries=0;
+function loadHero(){
+  const img=document.getElementById('heroimg');
+  img.onload=()=>{document.getElementById('hero').style.display='block';};
+  img.onerror=()=>{ if(++heroTries<15) setTimeout(loadHero,1500); };
+  img.src='/hero.png?t='+Date.now();
+}
+loadHero();
 </script></body></html>"""
 
 
@@ -310,6 +374,7 @@ def main():
         driver = "github" if (os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_MODELS_TOKEN")) else "echo"
     opts = {"vyges_bin": args.vyges_bin, "model": args.model}
 
+    threading.Thread(target=render_hero, daemon=True).start()  # real-chip thumbnail (best-effort)
     threading.Thread(target=sweep, args=(args.cases, driver, opts, args.pace), daemon=True).start()
 
     url = f"http://localhost:{args.port}"
