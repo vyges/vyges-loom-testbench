@@ -76,6 +76,8 @@ def sweep(cases_path, driver, opts, pace):
             "name": c["name"], "tool": c["tool"],
             "emoji": DISPLAY.get(c["tool"], ("🔧", c["tool"], None))[0],
             "title": DISPLAY.get(c["tool"], ("", c["tool"], None))[1],
+            "task": c.get("task", ""),          # the plain-English ask the AI is given
+            "call": "",                          # the tool + input the AI chose
             "status": "pending", "headline": "", "detail": "",
         } for c in cases]
         STATE["total"] = sum(1 for c in cases if not c.get("skip"))
@@ -95,7 +97,8 @@ def sweep(cases_path, driver, opts, pace):
             set_status(i, "thinking", headline="AI is choosing a tool…" if driver != "echo" else "preparing…")
             time.sleep(pace)
             called, args = DRIVERS[driver](c, tools, opts)
-            set_status(i, "running", headline=f"running {called}…", detail=json.dumps(args))
+            inputs = ", ".join(str(v) for v in args.values()) if isinstance(args, dict) else str(args)
+            set_status(i, "running", call=f"{called}  ·  {inputs}", headline=f"running {called}…")
             time.sleep(pace)
             result = srv.call_tool(called, args)
             checks = run_checks(c, called, result)
@@ -146,6 +149,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   header{ padding:1.6rem 1.2rem .4rem; text-align:center; }
   h1{ margin:.1rem 0; font-size:1.5rem; letter-spacing:.2px; }
   .sub{ color:#9fb0c8; font-size:.95rem; }
+  .explain{ max-width:720px; margin:.9rem auto 0; color:#93a2ba; font-size:.88rem; line-height:1.5; text-align:left; }
   .bot{ font-weight:700; color:#7bd88f; }
   .bar{ max-width:900px; margin:1rem auto .4rem; height:8px; border-radius:99px; background:#1c2536; overflow:hidden; }
   .bar > i{ display:block; height:100%; width:0; background:linear-gradient(90deg,#4f8cff,#7bd88f); transition:width .4s ease; }
@@ -158,7 +162,11 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   .emoji{ font-size:1.3rem; }
   .name{ font-weight:600; }
   .tool{ color:#8595ad; font-size:.78rem; }
-  .hl{ margin-top:.55rem; font-size:.9rem; color:#c7d3e6; min-height:1.1em; }
+  .task{ margin-top:.5rem; color:#93a2ba; font-size:.8rem; font-style:italic; }
+  .call{ margin-top:.35rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem;
+         color:#8fb3ff; min-height:1em; }
+  .call:empty{ display:none; }
+  .hl{ margin-top:.4rem; font-size:.9rem; color:#c7d3e6; min-height:1.1em; }
   .dot{ margin-left:auto; width:11px; height:11px; border-radius:99px; background:#3a4560; }
   /* states */
   .card.pending{ }
@@ -178,16 +186,27 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   @keyframes pop{ 0%{ transform:scale(.97);} 55%{ transform:scale(1.03);} 100%{ transform:scale(1);} }
   footer{ text-align:center; color:#63748f; font-size:.8rem; padding-bottom:2rem; color:#63748f; }
   .done-banner{ text-align:center; font-size:1.15rem; font-weight:700; color:#7bd88f; margin:.4rem 0 1rem; min-height:1.3em; }
+  a{ color:#8fb3ff; text-decoration:none; } a:hover{ text-decoration:underline; }
 </style></head><body>
 <header>
   <h1>🤖 Watch an AI run silicon sign-off</h1>
   <div class="sub"><span class="bot" id="model">…</span> is driving the open <b>Loom</b> engines through <code>vyges mcp</code> — live.</div>
+  <p class="explain">Each card is a <b>real chip sign-off engine</b> (timing, power, IR-drop, LVS, thermal…).
+  The AI is handed a plain-English request and the engines' self-descriptions — nothing else — and must
+  decide <b>which engine to run and which input file to feed it</b>. The engine then runs for real and
+  returns its own content-addressed result. The intelligence is in the routing; the ground truth is
+  deterministic — swap the model out and the same call reproduces the same numbers.</p>
 </header>
 <div class="bar"><i id="fill"></i></div>
 <div class="count" id="count">connecting…</div>
 <div class="done-banner" id="banner"></div>
 <div class="grid" id="grid"></div>
-<footer>Every card is a real engine invocation returning its own content-addressed sign-off result. · vyges/vyges-loom-testbench</footer>
+<footer>
+  Every card is a real engine invocation returning its own content-addressed sign-off result.<br>
+  <a href="https://vyges.com">vyges.com</a> ·
+  <a href="https://vyges.com/publications">Publications</a> ·
+  <a href="https://github.com/vyges/vyges-loom-testbench">Source</a>
+</footer>
 <script>
 const grid = document.getElementById('grid');
 let built = false;
@@ -198,7 +217,10 @@ function build(cases){
     el.className = 'card '+c.status; el.id = 'c-'+c.name;
     el.innerHTML = `<div class="top"><span class="emoji">${c.emoji}</span>
       <div><div class="name">${c.title}</div><div class="tool">${c.tool}</div></div>
-      <span class="dot"></span></div><div class="hl"></div>`;
+      <span class="dot"></span></div>
+      <div class="task">“${c.task||''}”</div>
+      <div class="call"></div>
+      <div class="hl"></div>`;
     grid.appendChild(el);
   });
   built = true;
@@ -212,6 +234,7 @@ async function tick(){
       s.cases.forEach(c=>{
         const el = document.getElementById('c-'+c.name); if(!el) return;
         el.className = 'card '+c.status;
+        el.querySelector('.call').textContent = c.call ? ('→ '+c.call) : '';
         el.querySelector('.hl').textContent = c.headline || '';
       });
       const pct = s.total ? Math.round(100*s.done/s.total) : 0;
