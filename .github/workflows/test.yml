@@ -1,11 +1,10 @@
 name: test
 
-# Conformance test for the Vyges Loom sign-off engines driven through `vyges mcp`.
-# Two jobs:
+# Conformance run for the Vyges Loom sign-off engines, driven through `vyges mcp`.
 #   deterministic — replays known-good tool calls (no LLM); this GATES.
-#   agentic       — a free GitHub Models LLM must pick the tool + form its args from
-#                   the engine descriptors alone. ADVISORY (model output isn't
-#                   bit-reproducible), so it never fails the workflow.
+#   agentic       — one GitHub Models LLM must pick each tool + form its args from the
+#                   engine descriptors alone. ADVISORY (never fails the run).
+#   report        — publishes a dashboard of both to GitHub Pages.
 
 on:
   workflow_dispatch:
@@ -15,75 +14,74 @@ on:
 
 permissions:
   contents: read
-  models: read            # free GitHub Models access for public repos
+  models: read
+  pages: write
+  id-token: write
+
+env:
+  MODEL: openai/gpt-4.1
 
 jobs:
   deterministic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install the Vyges CLI
-        # cargo-dist installer for the public CLI. Confirm/adjust the URL for your setup.
+      - name: Install the Vyges CLI + Loom engines
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
             https://github.com/vyges-tools/cli/releases/latest/download/vyges-installer.sh | sh
           echo "$HOME/.vyges/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Install the Loom engines
-        run: vyges install loom
-
+      - run: vyges install loom
       - name: Deterministic conformance (gates)
         run: |
           python3 conformance.py cases.json --driver echo --report report-echo.json | tee out.txt
-          {
-            echo '## Deterministic conformance (echo)';
-            echo '```'; cat out.txt; echo '```';
-          } >> "$GITHUB_STEP_SUMMARY"
-
+          { echo '## Deterministic (echo)'; echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        with:
-          name: report-echo
-          path: report-echo.json
+        with: { name: report-echo, path: report-echo.json }
 
   agentic:
     runs-on: ubuntu-latest
-    needs: deterministic
-    strategy:
-      fail-fast: false
-      matrix:
-        model:
-          - openai/gpt-4.1
-          - openai/gpt-4o-mini
-          - openai/gpt-4o
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install the Vyges CLI
+      - name: Install the Vyges CLI + Loom engines
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
             https://github.com/vyges-tools/cli/releases/latest/download/vyges-installer.sh | sh
           echo "$HOME/.vyges/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Install the Loom engines
-        run: vyges install loom
-
-      - name: Agentic conformance (advisory) — ${{ matrix.model }}
+      - run: vyges install loom
+      - name: Agentic conformance (advisory) — ${{ env.MODEL }}
         continue-on-error: true          # advisory: a model miss / rate-limit never fails CI
         env:
           GITHUB_TOKEN: ${{ secrets.MODELS_TOKEN || github.token }}
         run: |
-          slug=$(echo '${{ matrix.model }}' | tr '/:' '__')
-          python3 conformance.py cases.json --driver github --model '${{ matrix.model }}' \
-            --report "report-github-$slug.json" | tee out.txt
-          {
-            echo "## Agentic conformance — ${{ matrix.model }}";
-            echo '```'; cat out.txt; echo '```';
-          } >> "$GITHUB_STEP_SUMMARY"
-
+          python3 conformance.py cases.json --driver github --model "$MODEL" \
+            --report "report-agentic.json" | tee out.txt
+          { echo "## Agentic — $MODEL"; echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        with:
-          name: report-github-${{ strategy.job-index }}
-          path: report-github-*.json
+        with: { name: report-agentic, path: report-agentic.json }
+
+  report:
+    needs: [deterministic, agentic]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: reports, merge-multiple: true }
+      - name: Render the dashboard
+        run: |
+          python3 render_report.py --out site \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            reports/report-echo.json reports/report-agentic.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+      - id: deploy
+        uses: actions/deploy-pages@v4

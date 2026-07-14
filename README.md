@@ -1,53 +1,75 @@
 # vyges-loom-testbench
 
-A small, self-contained **conformance testbench** for the [Vyges Loom](https://vyges.com)
-sign-off engines, driven through the `vyges mcp` tool server.
+**Watch an AI run open silicon sign-off — live.**
 
-It answers one question, repeatably: **can a model actually drive the Loom engines
-end-to-end?** For each engine it starts the real `vyges mcp` JSON-RPC server, has a
-*driver* form one tool call, executes it, and validates the structured `loom-result`
-envelope that comes back (right tool, structured result, `status: ok`, a
-content-addressed `input_hash`, plus per-case expectations).
+[![test](https://github.com/vyges/vyges-loom-testbench/actions/workflows/test.yml/badge.svg)](https://github.com/vyges/vyges-loom-testbench/actions/workflows/test.yml)
+· **[Live dashboard →](https://vyges.github.io/vyges-loom-testbench/)**
 
-## Drivers
+A capable model is shown the [Vyges Loom](https://vyges.com) sign-off engines through
+`vyges mcp` and — with nothing but each engine's self-description — picks the right tool,
+forms its arguments, and runs it. Every result is the engine's own **real, content-addressed
+sign-off output**. No mock-ups, no handwaving.
 
-| driver | who forms the tool call | needs |
-| --- | --- | --- |
-| `echo` | replays the case's known-good arguments — no LLM, fully deterministic | nothing |
-| `github` | a **GitHub Models** LLM picks the tool + forms its args from the engine descriptor alone (free in public repos) | `GITHUB_TOKEN` (`models: read`) |
-| `anthropic` | same, via the Anthropic API | `ANTHROPIC_API_KEY` |
+In a clean cloud runner, a GitHub Models LLM drives **9/9** read-only engines correctly.
 
-The deterministic `echo` run is the gate. An LLM run is **advisory** — it measures how
-legible the engine descriptors are to a competent reader and yields a model-capability
-snapshot, but model output isn't bit-reproducible, so it never fails CI.
+## The live demo (blinky)
 
-## Run locally
+A local browser dashboard where each engine lights up as the AI drives it — pending →
+*AI is choosing the tool* → running → **PASS** with the engine's real headline (timing met,
+IR-drop OK, LVS match, …):
 
 ```sh
-# Install the Vyges CLI + the Loom engines (see https://vyges.com), then:
-export PATH="$HOME/.vyges/bin:$PATH"          # so the engines are discoverable
+# Install the Vyges CLI + engines once (https://vyges.com), then:
+export PATH="$HOME/.vyges/bin:$PATH"
 
-python3 conformance.py cases.json --driver echo            # deterministic
-python3 conformance.py --list-tools                        # inspect the tool surface
+# Watch the AI drive it (uses your GitHub Models token):
+GITHUB_TOKEN=$(gh auth token) python3 demo/live_demo.py --driver github --model openai/gpt-4.1
 
-# With a free GitHub Models token (models: read):
-GITHUB_TOKEN=… python3 conformance.py cases.json --driver github --model openai/gpt-4o-mini
+# …or the deterministic replay (no model, instant):
+python3 demo/live_demo.py --driver echo
 ```
 
-Exit code is non-zero if any non-skipped case fails.
+Opens `http://localhost:8756`. Stdlib only — no pip installs.
 
-## CI
+## What each engine shows
 
-`.github/workflows/test.yml` installs the CLI + engines, runs the deterministic sweep
-(gates), then runs the agentic sweep across a couple of free GitHub Models (advisory),
-and writes a results table to the job summary. Triggered on PR, weekly, or manually.
+| Engine | Real result you'll see |
+| --- | --- |
+| `sta-si` | timing met · WNS · max frequency |
+| `extract` | net count · total capacitance |
+| `lvs` | layout = schematic |
+| `power` | dynamic power |
+| `em-ir` | IR-drop within limit |
+| `thermal` | peak temperature vs limit |
+| `glitch` | hazard count |
+| `lec` | equivalent / not |
+| `gds-view` | layout rendered |
+
+## How it works
+
+`vyges mcp` exposes each installed Loom engine as a tool with a typed, self-describing
+interface. A **driver** forms one call per engine; the harness runs it and validates the
+`loom-result` envelope (right tool, `status: ok`, content-addressed `input_hash`, plus the
+expected result). Three drivers: `echo` (deterministic replay), `github` (GitHub Models),
+`anthropic`. The agentic drivers see the *whole* surface and must choose correctly from the
+descriptors alone — a legibility test as much as a functional one.
+
+## CI + published dashboard
+
+`.github/workflows/test.yml` on every PR / weekly:
+
+- **deterministic** — replays known-good calls; **gates** the run.
+- **agentic** — one GitHub Models model drives the surface; **advisory** (never fails CI).
+- **report** — publishes the matrix to **[the live dashboard](https://vyges.github.io/vyges-loom-testbench/)**.
+
+Model access uses a `models: read` token via the `MODELS_TOKEN` secret (falls back to the
+Actions token where the org has GitHub Models enabled).
 
 ## Coverage
 
-Nine read-only engines run against bundled [`fixtures/`](./fixtures) (Apache-2.0 Loom
-engine examples): `sta-si`, `extract`, `gds-view`, `lvs`, `power`, `em-ir`, `thermal`,
-`glitch`, `lec`. `drc`, `cdc`, and `char` are `skip`-documented in `cases.json` pending
-heavier inputs (a PDK DRC deck / a multi-clock netlist / ngspice + PDK models).
+Nine read-only engines run against bundled Apache-2.0 fixtures under [`fixtures/`](./fixtures).
+`drc`, `cdc`, and `char` are documented placeholders pending heavier inputs (a PDK DRC deck /
+a multi-clock netlist / ngspice + PDK models).
 
 ## License
 
