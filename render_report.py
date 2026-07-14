@@ -176,7 +176,7 @@ def main():
 <p class="meta">{meta}{run_link}</p>
 <div class="cta">
   <b>Vyges Loom</b> — open silicon sign-off you can drive with any model, on your own machine.
-  &nbsp; <a href="https://vyges.com">Learn more</a> ·
+  &nbsp; <a href="https://vyges.com/products/loom/">Learn more</a> ·
   <a href="https://vyges.com/contact"><b>Talk to us</b></a> ·
   <a href="https://github.com/vyges/vyges-loom-testbench">Reproduce this</a>
 </div>

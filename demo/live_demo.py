@@ -295,7 +295,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <div class="cta">
   <b>Vyges Loom</b> — open silicon sign-off you can drive with any model, on your own machine.
   <div class="cta-links">
-    <a class="btn" href="https://vyges.com">Learn more</a>
+    <a class="btn" href="https://vyges.com/products/loom/">Learn more</a>
     <a class="btn primary" href="https://vyges.com/contact">Talk to us</a>
     <a class="btn" href="https://github.com/vyges/vyges-loom-testbench">Run this demo</a>
   </div>
