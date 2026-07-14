@@ -133,7 +133,9 @@ def main():
   td.pass {{ color: #0a7c2f; font-weight: 700; }}
   td.fail {{ color: #c1121f; font-weight: 700; }}
   td.skip {{ color: #999; }}  td.na {{ color: #bbb; }}
-  footer {{ color: #888; font-size: .82rem; margin-top: 2rem; }}
+  footer {{ color: #888; font-size: .82rem; margin-top: 1rem; }}
+  .cta {{ margin-top: 2rem; padding: .9rem 1rem; background: #2f6df618; border: 1px solid #2f6df655;
+         border-radius: 8px; font-size: .92rem; }}
   a {{ color: #2563eb; }}
 </style></head><body>
 <h1>Vyges Loom — AI-driven silicon sign-off</h1>
@@ -154,11 +156,15 @@ def main():
   </tbody>
 </table>
 <p class="meta">{meta}{run_link}</p>
-<footer>
-  SKIP = fixture not bundled in this demo.<br>
-  <a href="https://vyges.com">vyges.com</a> ·
-  <a href="https://vyges.com/publications">Publications</a> ·
+<div class="cta">
+  <b>Vyges Loom</b> — open silicon sign-off you can drive with any model, on your own machine.
+  &nbsp; <a href="https://vyges.com">Learn more</a> ·
+  <a href="https://vyges.com/contact"><b>Talk to us</b></a> ·
   <a href="https://github.com/vyges/vyges-loom-testbench">Reproduce this</a>
+</div>
+<footer>
+  SKIP = fixture not bundled in this demo. ·
+  <a href="https://vyges.com/publications">Publications</a>
 </footer>
 </body></html>
 """
