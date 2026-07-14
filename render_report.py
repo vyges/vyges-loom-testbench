@@ -146,7 +146,7 @@ def main():
   td.skip {{ color: #999; }}  td.na {{ color: #bbb; }}
   footer {{ color: #888; font-size: .82rem; margin-top: 1rem; }}
   .chip {{ text-align: center; margin: 1.2rem 0; }}
-  .chip img {{ max-width: 100%; border-radius: 8px; border: 1px solid #8884; }}
+  .chip img {{ max-width: 190px; width: 100%; height: auto; border-radius: 8px; border: 1px solid #8884; }}
   .chip .cap {{ color: #888; font-size: .82rem; margin-top: .4rem; }}
   .cta {{ margin-top: 2rem; padding: .9rem 1rem; background: #2f6df618; border: 1px solid #2f6df655;
          border-radius: 8px; font-size: .92rem; }}

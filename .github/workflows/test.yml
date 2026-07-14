@@ -39,7 +39,7 @@ jobs:
           { echo '## Deterministic (echo)'; echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Render a real chip for the dashboard (best-effort)
         continue-on-error: true
-        run: vyges-gds-view render fixtures/drc/edge_sensor_glue.gds --top edge_sensor_glue --png --width 760 -o chip.png
+        run: vyges-gds-view render fixtures/drc/edge_sensor_glue.gds --top edge_sensor_glue --png --width 380 -o chip.png
       - uses: actions/upload-artifact@v4
         with: { name: report-echo, path: report-echo.json }
       - uses: actions/upload-artifact@v4
