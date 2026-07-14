@@ -35,6 +35,7 @@ import select
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -233,8 +234,19 @@ def driver_github(case, tools, opts):
         headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read())
+    # Free-tier GitHub Models is rate-limited; retry on 429, honoring Retry-After.
+    data = None
+    for attempt in range(6):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < 5:
+                wait = int(e.headers.get("Retry-After", 0) or 0) or (2 ** attempt)
+                time.sleep(min(wait, 60))
+                continue
+            raise
     calls = (data.get("choices", [{}])[0].get("message", {}) or {}).get("tool_calls") or []
     if not calls:
         raise RuntimeError("model returned no tool_call")

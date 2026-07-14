@@ -80,7 +80,7 @@
     {
       "name": "drc-signoff",
       "cwd": "fixtures/drc",
-      "task": "Run DRC on edge_sensor_glue.gds (a real taped-out sky130 block) using sky130-min.drc and report the violation count.",
+      "task": "Run DRC on the layout edge_sensor_glue.gds (a real taped-out sky130 block), with rule deck sky130-min.drc and top cell edge_sensor_glue, and report the violation count.",
       "tool": "drc",
       "arguments": { "gds": "edge_sensor_glue.gds", "deck": "sky130-min.drc", "top": "edge_sensor_glue" },
       "expect": { "result.clean": true, "result.violations": 0 }
