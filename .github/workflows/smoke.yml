@@ -44,7 +44,7 @@ jobs:
           python3 - <<'PY'
           import json, os, urllib.request, urllib.error
           url = "https://models.github.ai/inference/chat/completions"
-          body = {"model": "openai/gpt-4o-mini", "max_tokens": 5, "temperature": 0,
+          body = {"model": "openai/gpt-4.1", "max_tokens": 5, "temperature": 0,
                   "messages": [{"role": "user", "content": "reply with the word ok"}]}
           req = urllib.request.Request(
               url, data=json.dumps(body).encode(),

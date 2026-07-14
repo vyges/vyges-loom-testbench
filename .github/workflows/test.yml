@@ -54,6 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         model:
+          - openai/gpt-4.1
           - openai/gpt-4o-mini
           - openai/gpt-4o
     steps:
