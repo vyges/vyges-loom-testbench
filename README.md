@@ -56,7 +56,7 @@ descriptors alone — a legibility test as much as a functional one.
 
 ## CI + published dashboard
 
-`.github/workflows/test.yml` on every PR / weekly:
+`.github/workflows/test.yml`, run manually (`workflow_dispatch`):
 
 - **deterministic** — replays known-good calls; **gates** the run.
 - **agentic** — one GitHub Models model drives the surface; **advisory** (never fails CI).

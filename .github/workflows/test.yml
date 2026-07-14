@@ -7,10 +7,7 @@ name: test
 #   report        — publishes a dashboard of both to GitHub Pages.
 
 on:
-  workflow_dispatch:
-  pull_request:
-  schedule:
-    - cron: "0 6 * * 1"   # weekly, Monday 06:00 UTC
+  workflow_dispatch:   # manual only — the agentic sweep uses GitHub Models quota, so never auto-run
 
 permissions:
   contents: read
