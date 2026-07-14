@@ -24,6 +24,8 @@ import webbrowser
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from conformance import DRIVERS, McpServer, run_checks  # noqa: E402
 
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+
 
 # tool -> (emoji, human title, headline(result)->str) for a demo-friendly one-liner
 def _sta(r):
@@ -131,16 +133,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body.encode())
 
     def do_GET(self):
-        if self.path.startswith("/state"):
+        if self.path.startswith("/assets/"):
+            self._send_asset(os.path.basename(self.path))
+        elif self.path.startswith("/state"):
             with LOCK:
                 self._send(json.dumps(STATE), "application/json")
         else:
             self._send(PAGE, "text/html; charset=utf-8")
 
+    def _send_asset(self, name):
+        path = os.path.join(ASSETS_DIR, name)
+        if not os.path.isfile(path):
+            self.send_response(404)
+            self.end_headers()
+            return
+        with open(path, "rb") as f:
+            body = f.read()
+        ctype = "image/svg+xml" if name.endswith(".svg") else "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
 
 PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vyges Loom — live AI sign-off</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-HDGN88SSHD"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -201,13 +221,16 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   .btn.primary{ background:#2f6df6; border-color:#2f6df6; color:#fff; }
 </style></head><body>
 <header>
+  <img src="/assets/logo.svg" alt="Vyges" height="34" style="margin-bottom:.4rem">
   <h1>🤖 Watch an AI run silicon sign-off</h1>
   <div class="sub"><span class="bot" id="model">…</span> is driving the open <b>Loom</b> engines through <code>vyges mcp</code> — live.</div>
   <p class="explain">Each card is a <b>real chip sign-off engine</b> (timing, power, IR-drop, LVS, thermal…).
   The AI is handed a plain-English request and the engines' self-descriptions — nothing else — and must
   decide <b>which engine to run and which input file to feed it</b>. The engine then runs for real and
   returns its own content-addressed result. The intelligence is in the routing; the ground truth is
-  deterministic — swap the model out and the same call reproduces the same numbers.</p>
+  deterministic — swap the model out and the same call reproduces the same numbers.
+  <br><br>The model is a <b>stock, general-purpose LLM</b> — no fine-tuning, no training on these tools.
+  It gets it right purely by reading each engine's self-description at runtime.</p>
 </header>
 <div class="bar"><i id="fill"></i></div>
 <div class="count" id="count">connecting…</div>

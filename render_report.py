@@ -44,6 +44,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="site")
     ap.add_argument("--cases", default="cases.json")
+    ap.add_argument("--assets", default="assets")
     ap.add_argument("--commit", default=os.environ.get("GITHUB_SHA", "")[:7])
     ap.add_argument("--run-url", default="")
     ap.add_argument("reports", nargs="+")
@@ -101,6 +102,7 @@ def main():
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vyges Loom — AI-driven sign-off</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-HDGN88SSHD"></script>
 <script>
@@ -138,7 +140,8 @@ def main():
          border-radius: 8px; font-size: .92rem; }}
   a {{ color: #2563eb; }}
 </style></head><body>
-<h1>Vyges Loom — AI-driven silicon sign-off</h1>
+<p><img src="logo.svg" alt="Vyges" height="38"></p>
+<h1>Loom — AI-driven silicon sign-off</h1>
 <p class="lede">A live conformance run on a clean GitHub Actions runner.</p>
 <div class="explain">
   Each row is a <b>real chip sign-off engine</b> (timing, power, IR-drop, LVS, thermal, …), run
@@ -147,6 +150,8 @@ def main():
   feed it</b>; the engine then executes for real and returns its own content-addressed result. The
   <b>deterministic</b> column replays known-good calls with no model. The intelligence is in the
   routing — the ground truth is reproducible without any AI.
+  <br><br>The model is a <b>stock, general-purpose LLM</b> — no fine-tuning, no training on these
+  tools. It gets it right purely by reading each engine's self-description at runtime.
 </div>
 <div class="callout">{agent_line}</div>
 <table>
@@ -169,6 +174,11 @@ def main():
 </body></html>
 """
     os.makedirs(args.out, exist_ok=True)
+    for asset in ("favicon.svg", "logo.svg"):  # copy brand assets alongside the page
+        src = os.path.join(args.assets, asset)
+        if os.path.exists(src):
+            with open(src, "rb") as s, open(os.path.join(args.out, asset), "wb") as d:
+                d.write(s.read())
     with open(os.path.join(args.out, "index.html"), "w") as f:
         f.write(doc)
     print(f"wrote {os.path.join(args.out, 'index.html')} ({len(names)} engines, {len(reports)} columns)")
