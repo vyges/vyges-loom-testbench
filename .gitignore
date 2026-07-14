@@ -1,0 +1,4 @@
+report*.json
+out.txt
+__pycache__/
+*.pyc

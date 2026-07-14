@@ -1,0 +1,3 @@
+design:        block
+pdn:           block.pdn
+ir_limit_pct:  5.0       # fail if worst IR drop exceeds 5% of vdd

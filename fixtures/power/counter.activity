@@ -1,0 +1,8 @@
+# vyges-power activity map for vyges-em-ir
+# design counter  vdd 1.8000 V  mode vectored (VCD)
+# columns: instance  avg_current_a  toggle_rate_hz
+clkbuf  2.244397e-6  2.000000e8
+u0  4.378047e-7  6.000000e7
+u1  1.389289e-9  6.000000e7
+ff0  3.334000e-9  4.000000e7
+ff1  3.333667e-9  2.000000e7

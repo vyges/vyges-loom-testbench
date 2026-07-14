@@ -1,0 +1,11 @@
+design:           soc_block
+floorplan:        block.flp
+die_um:           1000 1000     # 1 mm × 1 mm die
+grid:             32 32         # solver grid
+thickness_um:     280           # silicon thickness
+k_si:             148.0         # silicon thermal conductivity (W/m·K)
+theta_ja:         40.0          # junction-to-ambient thermal resistance (K/W)
+ambient_c:        25.0          # ambient temperature
+t_limit_c:        105.0         # sign-off threshold
+leak_alpha_per_c: 0.004         # electro-thermal: leakage +0.4%/°C
+leak_t0_c:        25.0          # reference temp for the leakage model

@@ -1,0 +1,102 @@
+{
+  "_comment": "Public conformance cases for the Vyges Loom read-only (sign-off / verify / query) engines, driven through `vyges mcp`. Each `cwd` is relative and resolves against this file's directory (bundled fixtures under fixtures/). Confirm a tool's argument shape with `conformance.py --list-tools`. Cases with `skip` need heavier fixtures than this repo bundles.",
+  "defaults": {
+    "profile": "core",
+    "checks": ["tool_matches", "structured_envelope", "status_ok", "has_input_hash"]
+  },
+  "cases": [
+    {
+      "name": "sta-si-signoff",
+      "cwd": "fixtures/sta-si",
+      "task": "Run static-timing sign-off on the design described by seq.sta and tell me whether setup and hold timing are met.",
+      "tool": "sta-si",
+      "arguments": { "job": "seq.sta" },
+      "expect": { "result.design": "seq", "result.met": true, "result.hold_met": true }
+    },
+    {
+      "name": "extract-parasitics",
+      "cwd": "fixtures/extract",
+      "task": "Extract RC parasitics for the design in counter.ext and report the net count.",
+      "tool": "extract",
+      "arguments": { "job": "counter.ext" },
+      "expect": { "result.design": "counter", "result.nets": 2 }
+    },
+    {
+      "name": "gds-view-render",
+      "cwd": "fixtures/gds-view",
+      "task": "Render the layout in sample.gds to an image.",
+      "tool": "gds-view",
+      "arguments": { "gds": "sample.gds" }
+    },
+    {
+      "name": "lvs-inverter-compare",
+      "cwd": "fixtures/lvs",
+      "task": "Run LVS for the job in extract.lvs and report whether the layout matches the schematic.",
+      "tool": "lvs",
+      "arguments": { "job": "extract.lvs" },
+      "expect": { "result.matched": true }
+    },
+    {
+      "name": "power-estimate",
+      "cwd": "fixtures/power",
+      "task": "Estimate power for the design in counter.pwr and report total dynamic power.",
+      "tool": "power",
+      "arguments": { "job": "counter.pwr" },
+      "expect": { "result.design": "counter" }
+    },
+    {
+      "name": "em-ir-signoff",
+      "cwd": "fixtures/em-ir",
+      "task": "Run EM / IR-drop sign-off for the design in block.emir and report whether the IR-drop limit is met.",
+      "tool": "em-ir",
+      "arguments": { "job": "block.emir" },
+      "expect": { "result.design": "block", "result.ir_met": true }
+    },
+    {
+      "name": "thermal-analysis",
+      "cwd": "fixtures/thermal",
+      "task": "Run thermal analysis for the design in block.thermal and report the peak temperature.",
+      "tool": "thermal",
+      "arguments": { "job": "block.thermal" },
+      "expect": { "result.design": "soc_block" }
+    },
+    {
+      "name": "glitch-hazard-check",
+      "cwd": "fixtures/glitch",
+      "task": "Run glitch/hazard analysis on the netlist hazard.v using cells.lib and report the hazard count.",
+      "tool": "glitch",
+      "arguments": { "netlist": "hazard.v", "lib": "cells.lib" },
+      "expect": { "result.hazards": 1 }
+    },
+    {
+      "name": "lec-equivalence",
+      "cwd": "fixtures/lec",
+      "task": "Run logical-equivalence checking between golden.v and revised_ok.v (using cells.lib) and report whether they are equivalent.",
+      "tool": "lec",
+      "arguments": { "golden": "golden.v", "revised": "revised_ok.v", "lib": "cells.lib" },
+      "expect": { "result.equivalent": true }
+    },
+
+    {
+      "name": "drc-signoff",
+      "task": "Run DRC on the layout and report the violation count.",
+      "tool": "drc",
+      "arguments": { "gds": "REPLACE.gds", "deck": "REPLACE.drc", "top": "TOP" },
+      "skip": "needs a GDS + a DRC deck (e.g. sky130.drc from the PDK)"
+    },
+    {
+      "name": "cdc-check",
+      "task": "Run clock-domain-crossing checks and report the number of unsynchronized crossings.",
+      "tool": "cdc",
+      "arguments": { "netlist": "REPLACE.v", "lib": "REPLACE.lib", "sdc": "REPLACE.sdc" },
+      "skip": "needs a multi-clock gate netlist + liberty + sdc"
+    },
+    {
+      "name": "char-run",
+      "task": "Run characterization for the job and report the model fit.",
+      "tool": "char",
+      "arguments": { "job": "REPLACE.char" },
+      "skip": "needs a char job fixture + ngspice and the PDK device models on the host"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# A small two-pad PDN mesh feeding an internal load.
+vdd 1.8
+
+pad p1
+pad p2
+
+# straps on the top metal (met5) from each pad into the mesh
+res p1 a 0.05 met5
+res p2 b 0.05 met5
+
+# mesh on met4
+res a b 0.10 met4
+res a c 0.20 met4
+res b c 0.20 met4
+
+# current drawn by the block, lumped at the mesh centre
+load c 0.010
+
+# per-layer EM current limits (amps/segment)
+emlimit met5 0.50
+emlimit met4 0.10
