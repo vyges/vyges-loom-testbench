@@ -1,0 +1,60 @@
+name: smoke
+
+# Minimal plumbing check — does the environment come up? Installs the CLI + Loom
+# engines, confirms `vyges mcp` runs and lists its tools, and confirms GitHub Models
+# is reachable. Does NOT run any conformance case. Run it manually first to de-risk.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Vyges CLI
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/vyges-tools/cli/releases/latest/download/vyges-installer.sh | sh
+          echo "$HOME/.vyges/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: vyges --version
+        run: vyges --version
+
+      - name: Install the Loom engines
+        run: vyges install loom
+
+      - name: mcp runs and lists tools
+        run: |
+          echo '### vyges mcp --list' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          VYGES_MCP_PROFILE=core vyges mcp --list | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: GitHub Models is reachable
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          url = "https://models.github.ai/inference/chat/completions"
+          body = {"model": "openai/gpt-4o-mini", "max_tokens": 5, "temperature": 0,
+                  "messages": [{"role": "user", "content": "reply with the word ok"}]}
+          req = urllib.request.Request(
+              url, data=json.dumps(body).encode(),
+              headers={"content-type": "application/json",
+                       "authorization": "Bearer " + os.environ["GITHUB_TOKEN"]},
+              method="POST")
+          with urllib.request.urlopen(req, timeout=60) as r:
+              data = json.loads(r.read())
+          reply = data["choices"][0]["message"]["content"]
+          print("GitHub Models reachable — model replied:", repr(reply))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(f"\n### GitHub Models\nreachable — reply: `{reply}`\n")
+          PY
