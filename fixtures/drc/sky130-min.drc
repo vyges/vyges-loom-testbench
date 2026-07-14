@@ -1,0 +1,8 @@
+# Minimal sky130 rule deck — real sky130 minimum width/spacing (nm / dbu).
+# A DRC-clean, taped-out block reports zero violations against these.
+width 66/20 150     # poly min width  (poly.1a 0.15 um)
+space 66/20 210     # poly min space  (poly.2  0.21 um)
+width 68/20 140     # met1 min width  (met1.1  0.14 um)
+space 68/20 140     # met1 min space  (met1.2  0.14 um)
+width 69/20 140     # met2 min width
+space 69/20 140     # met2 min space

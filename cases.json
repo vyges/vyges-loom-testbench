@@ -79,17 +79,19 @@
 
     {
       "name": "drc-signoff",
-      "task": "Run DRC on the layout and report the violation count.",
+      "cwd": "fixtures/drc",
+      "task": "Run DRC on edge_sensor_glue.gds (a real taped-out sky130 block) using sky130-min.drc and report the violation count.",
       "tool": "drc",
-      "arguments": { "gds": "REPLACE.gds", "deck": "REPLACE.drc", "top": "TOP" },
-      "skip": "needs a GDS + a DRC deck (e.g. sky130.drc from the PDK)"
+      "arguments": { "gds": "edge_sensor_glue.gds", "deck": "sky130-min.drc", "top": "edge_sensor_glue" },
+      "expect": { "result.clean": true, "result.violations": 0 }
     },
     {
       "name": "cdc-check",
-      "task": "Run clock-domain-crossing checks and report the number of unsynchronized crossings.",
+      "cwd": "fixtures/cdc",
+      "task": "Run clock-domain-crossing checks on cdc_demo.v (using cells.lib and cdc_demo.sdc) and report unsynchronized crossings.",
       "tool": "cdc",
-      "arguments": { "netlist": "REPLACE.v", "lib": "REPLACE.lib", "sdc": "REPLACE.sdc" },
-      "skip": "needs a multi-clock gate netlist + liberty + sdc"
+      "arguments": { "netlist": "cdc_demo.v", "lib": "cells.lib", "sdc": "cdc_demo.sdc" },
+      "expect": { "result.domains": 2, "result.unsynchronized": 1 }
     },
     {
       "name": "char-run",

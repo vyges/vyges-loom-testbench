@@ -41,8 +41,8 @@ DISPLAY = {
     "thermal":  ("🌡️", "Thermal", lambda r: f"peak {r.get('tmax_c', 0):.1f} °C (limit {r.get('t_limit_c', '?')})"),
     "glitch":   ("〰️", "Glitch / Hazard", lambda r: f"{r.get('hazards', '?')} hazard(s)"),
     "lec":      ("🟰", "Logic Equivalence", lambda r: "EQUIVALENT" if r.get("equivalent") else "NOT EQUIVALENT"),
-    "drc":      ("📐", "DRC", lambda r: "ok"),
-    "cdc":      ("🔀", "Clock-Domain Crossing", lambda r: "ok"),
+    "drc":      ("📐", "DRC (real taped-out block)", lambda r: "CLEAN · 0 violations" if r.get("clean") else f"{r.get('violations', '?')} violation(s)"),
+    "cdc":      ("🔀", "Clock-Domain Crossing", lambda r: f"{r.get('domains', '?')} domains · {r.get('unsynchronized', '?')} unsynchronized crossing(s)"),
     "char":     ("📊", "Characterization", lambda r: "ok"),
 }
 
@@ -141,6 +141,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vyges Loom — live AI sign-off</title>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-HDGN88SSHD"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-HDGN88SSHD');
+</script>
 <style>
   :root{ --bg:#0b0f17; --card:#141a26; --line:#232c3d; --dim:#7c89a0; }
   *{ box-sizing:border-box; }
@@ -187,6 +194,11 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   footer{ text-align:center; color:#63748f; font-size:.8rem; padding-bottom:2rem; color:#63748f; }
   .done-banner{ text-align:center; font-size:1.15rem; font-weight:700; color:#7bd88f; margin:.4rem 0 1rem; min-height:1.3em; }
   a{ color:#8fb3ff; text-decoration:none; } a:hover{ text-decoration:underline; }
+  .cta{ max-width:640px; margin:1rem auto 2rem; text-align:center; color:#c7d3e6; font-size:.95rem; }
+  .cta-links{ margin-top:.8rem; display:flex; gap:.6rem; justify-content:center; flex-wrap:wrap; }
+  .btn{ padding:.5rem 1rem; border:1px solid #2f3c55; border-radius:8px; color:#c7d3e6; font-weight:600; }
+  .btn:hover{ border-color:#4f8cff; text-decoration:none; }
+  .btn.primary{ background:#2f6df6; border-color:#2f6df6; color:#fff; }
 </style></head><body>
 <header>
   <h1>🤖 Watch an AI run silicon sign-off</h1>
@@ -201,6 +213,14 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <div class="count" id="count">connecting…</div>
 <div class="done-banner" id="banner"></div>
 <div class="grid" id="grid"></div>
+<div class="cta">
+  <b>Vyges Loom</b> — open silicon sign-off you can drive with any model, on your own machine.
+  <div class="cta-links">
+    <a class="btn" href="https://vyges.com">Learn more</a>
+    <a class="btn primary" href="https://vyges.com/contact">Talk to us</a>
+    <a class="btn" href="https://github.com/vyges/vyges-loom-testbench">Run this demo</a>
+  </div>
+</div>
 <footer>
   Every card is a real engine invocation returning its own content-addressed sign-off result.<br>
   <a href="https://vyges.com">vyges.com</a> ·
