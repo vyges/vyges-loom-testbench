@@ -311,6 +311,18 @@ def run_checks(case, called_tool, result):
 # --------------------------------------------------------------------------- #
 
 
+def _tool_version(vyges_bin):
+    """The Vyges CLI / Loom version driving the sign-off (e.g. `vyges 0.1.16 (280f639)`),
+    recorded alongside the AI model so the dashboard shows BOTH the deterministic tool
+    version and the model. Best-effort: None if the binary can't be queried."""
+    try:
+        out = subprocess.run([vyges_bin, "--version"], capture_output=True, text=True, timeout=10)
+        line = (out.stdout or out.stderr).strip().splitlines()
+        return line[0].strip() if line else None
+    except Exception:
+        return None
+
+
 def load_cases(path):
     with open(path) as f:
         doc = json.load(f)
@@ -415,6 +427,7 @@ def main(argv=None):
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "driver": args.driver,
         "model": args.model if args.driver != "echo" else None,
+        "vyges_version": _tool_version(args.vyges_bin),
         "passed": npass,
         "ran": len(ran),
         "skipped": len(skipped),

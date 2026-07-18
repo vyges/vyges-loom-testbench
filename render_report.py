@@ -81,11 +81,13 @@ def main():
             "<code>vyges gds-view</code> — the AI signs off blocks like this below.</div></div>"
         )
 
+    vyges_ver = next((r.get("vyges_version") for r in reports if r.get("vyges_version")), None)
     agent = next((r for r in reports if r.get("driver") != "echo"), None)
     agent_line = ""
     if agent:
+        via = (f" through <b>{html.escape(str(vyges_ver))}</b>" if vyges_ver else "")
         agent_line = (f"The AI agent (<b>{html.escape(str(agent.get('model')))}</b>) drove "
-                      f"<b>{agent.get('passed', 0)}/{agent.get('ran', 0)}</b> engines correctly "
+                      f"<b>{agent.get('passed', 0)}/{agent.get('ran', 0)}</b> engines correctly{via} "
                       f"— choosing the tool and forming its arguments from the engine descriptors alone.")
 
     rows = []
@@ -104,7 +106,7 @@ def main():
         rows.append("<tr>" + "".join(tds) + "</tr>")
 
     headers = "".join(f"<th>{col_label(r)}</th>" for r in reports)
-    meta = " · ".join(x for x in [generated, (f"commit {args.commit}" if args.commit else "")] if x)
+    meta = " · ".join(x for x in [generated, (f"{html.escape(str(vyges_ver))}" if vyges_ver else ""), (f"commit {args.commit}" if args.commit else "")] if x)
     run_link = f" · <a href='{html.escape(args.run_url)}'>run log</a>" if args.run_url else ""
 
     doc = f"""<!doctype html>
