@@ -86,8 +86,30 @@ def main():
     agent_line = ""
     if agent:
         via = (f" through <b>{html.escape(str(vyges_ver))}</b>" if vyges_ver else "")
+        # `ran` excludes skipped cases, so the ratio alone reads as "everything" while the
+        # table below shows more rows than the denominator. Name the skips in the headline
+        # rather than leaving them to be discovered by counting rows: a bounded run that
+        # reads as a complete one is the failure mode worth avoiding on a public dashboard.
+        # Take the reason from the cases themselves; hardcoding today's ("fixture not
+        # bundled") would silently become false the first time something skips for another
+        # cause. Several distinct reasons → just the count, and the table carries the detail.
+        nskip = agent.get("skipped", 0)
+        reasons = sorted({str(c.get("reason", "")).strip()
+                          for c in agent.get("cases", []) if c.get("skipped")} - {""})
+        # Inline a single short reason; otherwise just the count. A long reason is not
+        # truncated — a half-sentence reads as a different reason than the real one. And
+        # no "see below": the row's reason is a title= tooltip, so it is hover-only and
+        # invisible on touch devices; pointing at detail the reader may not be able to see
+        # is the same overclaim in miniature.
+        if not nskip:
+            skip_note = ""
+        elif len(reasons) == 1 and len(reasons[0]) <= 60:
+            skip_note = f" ({nskip} skipped — {html.escape(reasons[0])})"
+        else:
+            skip_note = f" ({nskip} skipped)"
         agent_line = (f"The AI agent (<b>{html.escape(str(agent.get('model')))}</b>) drove "
-                      f"<b>{agent.get('passed', 0)}/{agent.get('ran', 0)}</b> engines correctly{via} "
+                      f"<b>{agent.get('passed', 0)}/{agent.get('ran', 0)}</b> engines correctly{via}"
+                      f"{skip_note} "
                       f"— choosing the tool and forming its arguments from the engine descriptors alone.")
 
     rows = []
