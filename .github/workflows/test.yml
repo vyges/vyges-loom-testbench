@@ -9,14 +9,18 @@ name: test
 on:
   # MANUAL ONLY, and deliberately so. Do not add push/PR/schedule triggers.
   #
-  # This repo publishes a public dashboard that people are shown live. Running it on every
-  # push means a release in progress, a half-finished engine change, or an unrelated commit
-  # can repaint that page red while someone is looking at it — or mid field demo. The run is
-  # dispatched when we want a result, not whenever the tree moves.
+  # Two independent reasons, both real:
   #
-  # (An earlier comment here blamed GitHub Models quota. That is not the reason: the org is a
-  # free account and this repo is public, so Actions and Models are both free. The reason is
-  # control over what the public dashboard says and when it changes.)
+  #   1. GitHub Models quota. A free account still has one — free is not unmetered — and the
+  #      agentic job spends it on every case, every run. Running on each push burns the
+  #      budget on commits nobody is asking a question about, and the sweep then fails when
+  #      someone actually wants an answer.
+  #
+  #   2. Control over a public dashboard. This repo publishes a page people are shown live.
+  #      On-push means a release in progress, a half-finished engine change, or an unrelated
+  #      commit can repaint it red while someone is looking at it, or mid field demo.
+  #
+  # Dispatched when we want a result, not whenever the tree moves.
   workflow_dispatch:
 
 permissions:
