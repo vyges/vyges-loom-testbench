@@ -10,7 +10,11 @@ A capable model is shown the [Vyges Loom](https://vyges.com) sign-off engines th
 forms its arguments, and runs it. Every result is the engine's own **real, content-addressed
 sign-off output**. No mock-ups, no handwaving.
 
-In a clean cloud runner, a GitHub Models LLM drives **9/9** read-only engines correctly.
+<!-- BEGIN:engines (generated) -->
+The testbench exercises **13** read-only engines through `vyges mcp`: `cdc`, `char`, `drc`, `em-ir`, `extract`, `gds-view`, `glitch`, `lec`, `lvs`, `meas`, `power`, `sta-si`, `thermal`.
+
+How many of them the model drives correctly is whatever the badge above reports from the last run — not a number kept here.
+<!-- END:engines -->
 
 ## The live demo (blinky)
 
@@ -67,7 +71,7 @@ Actions token where the org has GitHub Models enabled).
 
 ## Coverage
 
-Nine read-only engines run against bundled Apache-2.0 fixtures under [`fixtures/`](./fixtures).
+The read-only engines listed above run against bundled Apache-2.0 fixtures under [`fixtures/`](./fixtures).
 `drc`, `cdc`, and `char` are documented placeholders pending heavier inputs (a PDK DRC deck /
 a multi-clock netlist / ngspice + PDK models).
 

@@ -30,6 +30,12 @@ jobs:
           echo "$HOME/.vyges/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - run: vyges install loom
+      # A case added without regenerating the README leaves the public page claiming a
+      # different number of engines than the repo actually exercises. Fails the build rather
+      # than drifting quietly.
+      - name: README engine list in sync with cases.json
+        run: python3 scripts_sync_readme.py --check
+
       - name: Deterministic conformance (gates)
         run: |
           python3 conformance.py cases.json --driver echo --report report-echo.json | tee out.txt

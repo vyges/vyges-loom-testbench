@@ -2,7 +2,12 @@
   "_comment": "Public conformance cases for the Vyges Loom read-only (sign-off / verify / query) engines, driven through `vyges mcp`. Each `cwd` is relative and resolves against this file's directory (bundled fixtures under fixtures/). Confirm a tool's argument shape with `conformance.py --list-tools`. Cases with `skip` need heavier fixtures than this repo bundles.",
   "defaults": {
     "profile": "core",
-    "checks": ["tool_matches", "structured_envelope", "status_ok", "has_input_hash"]
+    "checks": [
+      "tool_matches",
+      "structured_envelope",
+      "status_ok",
+      "has_input_hash"
+    ]
   },
   "cases": [
     {
@@ -10,95 +15,170 @@
       "cwd": "fixtures/sta-si",
       "task": "Run static-timing sign-off on the design described by seq.sta and tell me whether setup and hold timing are met.",
       "tool": "sta-si",
-      "arguments": { "job": "seq.sta" },
-      "expect": { "result.design": "seq", "result.met": true, "result.hold_met": true }
+      "arguments": {
+        "job": "seq.sta"
+      },
+      "expect": {
+        "result.design": "seq",
+        "result.met": true,
+        "result.hold_met": true
+      }
     },
     {
       "name": "extract-parasitics",
       "cwd": "fixtures/extract",
       "task": "Extract RC parasitics for the design in counter.ext and report the net count.",
       "tool": "extract",
-      "arguments": { "job": "counter.ext" },
-      "expect": { "result.design": "counter", "result.nets": 2 }
+      "arguments": {
+        "job": "counter.ext"
+      },
+      "expect": {
+        "result.design": "counter",
+        "result.nets": 2
+      }
     },
     {
       "name": "gds-view-render",
       "cwd": "fixtures/gds-view",
       "task": "Render the layout in sample.gds to an image.",
       "tool": "gds-view",
-      "arguments": { "gds": "sample.gds" }
+      "arguments": {
+        "gds": "sample.gds"
+      }
     },
     {
       "name": "lvs-inverter-compare",
       "cwd": "fixtures/lvs",
       "task": "Run LVS for the job in extract.lvs and report whether the layout matches the schematic.",
       "tool": "lvs",
-      "arguments": { "job": "extract.lvs" },
-      "expect": { "result.matched": true }
+      "arguments": {
+        "job": "extract.lvs"
+      },
+      "expect": {
+        "result.matched": true
+      }
     },
     {
       "name": "power-estimate",
       "cwd": "fixtures/power",
       "task": "Estimate power for the design in counter.pwr and report total dynamic power.",
       "tool": "power",
-      "arguments": { "job": "counter.pwr" },
-      "expect": { "result.design": "counter" }
+      "arguments": {
+        "job": "counter.pwr"
+      },
+      "expect": {
+        "result.design": "counter"
+      }
     },
     {
       "name": "em-ir-signoff",
       "cwd": "fixtures/em-ir",
       "task": "Run EM / IR-drop sign-off for the design in block.emir and report whether the IR-drop limit is met.",
       "tool": "em-ir",
-      "arguments": { "job": "block.emir" },
-      "expect": { "result.design": "block", "result.ir_met": true }
+      "arguments": {
+        "job": "block.emir"
+      },
+      "expect": {
+        "result.design": "block",
+        "result.ir_met": true
+      }
     },
     {
       "name": "thermal-analysis",
       "cwd": "fixtures/thermal",
       "task": "Run thermal analysis for the design in block.thermal and report the peak temperature.",
       "tool": "thermal",
-      "arguments": { "job": "block.thermal" },
-      "expect": { "result.design": "soc_block" }
+      "arguments": {
+        "job": "block.thermal"
+      },
+      "expect": {
+        "result.design": "soc_block"
+      }
     },
     {
       "name": "glitch-hazard-check",
       "cwd": "fixtures/glitch",
       "task": "Run glitch/hazard analysis on the netlist hazard.v using cells.lib and report the hazard count.",
       "tool": "glitch",
-      "arguments": { "netlist": "hazard.v", "lib": "cells.lib" },
-      "expect": { "result.hazards": 1 }
+      "arguments": {
+        "netlist": "hazard.v",
+        "lib": "cells.lib"
+      },
+      "expect": {
+        "result.hazards": 1
+      }
     },
     {
       "name": "lec-equivalence",
       "cwd": "fixtures/lec",
       "task": "Run logical-equivalence checking between golden.v and revised_ok.v (using cells.lib) and report whether they are equivalent.",
       "tool": "lec",
-      "arguments": { "golden": "golden.v", "revised": "revised_ok.v", "lib": "cells.lib" },
-      "expect": { "result.equivalent": true }
+      "arguments": {
+        "golden": "golden.v",
+        "revised": "revised_ok.v",
+        "lib": "cells.lib"
+      },
+      "expect": {
+        "result.equivalent": true
+      }
     },
-
     {
       "name": "drc-signoff",
       "cwd": "fixtures/drc",
       "task": "Run DRC on the layout edge_sensor_glue.gds (a real taped-out sky130 block), with rule deck sky130-min.drc and top cell edge_sensor_glue, and report the violation count.",
       "tool": "drc",
-      "arguments": { "gds": "edge_sensor_glue.gds", "deck": "sky130-min.drc", "top": "edge_sensor_glue" },
-      "expect": { "result.clean": true, "result.violations": 0 }
+      "arguments": {
+        "gds": "edge_sensor_glue.gds",
+        "deck": "sky130-min.drc",
+        "top": "edge_sensor_glue"
+      },
+      "expect": {
+        "result.clean": true,
+        "result.violations": 0
+      }
     },
     {
       "name": "cdc-check",
       "cwd": "fixtures/cdc",
       "task": "Run clock-domain-crossing checks on cdc_demo.v (using cells.lib and cdc_demo.sdc) and report unsynchronized crossings.",
       "tool": "cdc",
-      "arguments": { "netlist": "cdc_demo.v", "lib": "cells.lib", "sdc": "cdc_demo.sdc" },
-      "expect": { "result.domains": 2, "result.unsynchronized": 1 }
+      "arguments": {
+        "netlist": "cdc_demo.v",
+        "lib": "cells.lib",
+        "sdc": "cdc_demo.sdc"
+      },
+      "expect": {
+        "result.domains": 2,
+        "result.unsynchronized": 1
+      }
     },
     {
       "name": "char-run",
       "task": "Run characterization for the job and report the model fit.",
       "tool": "char",
-      "arguments": { "job": "REPLACE.char" },
+      "arguments": {
+        "job": "REPLACE.char"
+      },
       "skip": "needs a char job fixture + ngspice and the PDK device models on the host"
+    },
+    {
+      "name": "meas-spectral-thd",
+      "cwd": "fixtures/meas",
+      "task": "Measure the total harmonic distortion of the captured tone in tone.series and tell me whether it meets a -30 dB target. The capture is coherent with the fundamental on DFT bin 16; account for harmonics 2 through 5.",
+      "tool": "meas",
+      "arguments": {
+        "series": "tone.series",
+        "fundamental_bin": 16,
+        "metric": "thd",
+        "harmonics": "2,3,4,5",
+        "target": -30
+      },
+      "expect": {
+        "result.metric": "thd",
+        "result.met": true,
+        "result.n": 1024,
+        "result.fundamental_bin": 16
+      }
     }
   ]
 }
