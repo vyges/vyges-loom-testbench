@@ -7,7 +7,17 @@ name: test
 #   report        — publishes a dashboard of both to GitHub Pages.
 
 on:
-  workflow_dispatch:   # manual only — the agentic sweep uses GitHub Models quota, so never auto-run
+  # MANUAL ONLY, and deliberately so. Do not add push/PR/schedule triggers.
+  #
+  # This repo publishes a public dashboard that people are shown live. Running it on every
+  # push means a release in progress, a half-finished engine change, or an unrelated commit
+  # can repaint that page red while someone is looking at it — or mid field demo. The run is
+  # dispatched when we want a result, not whenever the tree moves.
+  #
+  # (An earlier comment here blamed GitHub Models quota. That is not the reason: the org is a
+  # free account and this repo is public, so Actions and Models are both free. The reason is
+  # control over what the public dashboard says and when it changes.)
+  workflow_dispatch:
 
 permissions:
   contents: read
