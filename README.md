@@ -11,7 +11,7 @@ forms its arguments, and runs it. Every result is the engine's own **real, conte
 sign-off output**. No mock-ups, no handwaving.
 
 <!-- BEGIN:engines (generated) -->
-The testbench exercises **13** read-only engines through `vyges mcp`: `cdc`, `char`, `drc`, `em-ir`, `extract`, `gds-view`, `glitch`, `lec`, `lvs`, `meas`, `power`, `sta-si`, `thermal`.
+The testbench exercises **14** read-only engines through `vyges mcp`: `cdc`, `char`, `drc`, `em-ir`, `extract`, `gds-view`, `glitch`, `lec`, `lvs`, `meas`, `opendb`, `power`, `sta-si`, `thermal`.
 
 How many of them the model drives correctly is whatever the badge above reports from the last run — not a number kept here.
 <!-- END:engines -->

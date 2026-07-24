@@ -179,6 +179,23 @@
         "result.n": 1024,
         "result.fundamental_bin": 16
       }
+    },
+    {
+      "name": "opendb-wire-length",
+      "cwd": "fixtures/opendb",
+      "profile": "core+opendb",
+      "task": "Report the total routed wire length of the design in design.odb.",
+      "tool": "opendb",
+      "arguments": {
+        "args": [
+          "report-wire-length",
+          "--input",
+          "design.odb"
+        ]
+      },
+      "expect": {
+        "result.total_wire_length_dbu": 706680
+      }
     }
   ]
 }
