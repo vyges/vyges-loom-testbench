@@ -184,7 +184,7 @@
       "name": "opendb-wire-length",
       "cwd": "fixtures/opendb",
       "profile": "core+opendb",
-      "task": "Report the total routed wire length of the design in design.odb.",
+      "task": "In the OpenDB design database design.odb, report the total routed wire length (in DBU).",
       "tool": "opendb",
       "arguments": {
         "args": [
