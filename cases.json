@@ -181,20 +181,24 @@
       }
     },
     {
-      "name": "opendb-wire-length",
+      "name": "opendb-block-name",
       "cwd": "fixtures/opendb",
       "profile": "core+opendb",
-      "task": "In the OpenDB design database design.odb, report the total routed wire length (in DBU).",
+      "task": "What is the name of the top-level design block stored in the OpenDB database design.odb?",
       "tool": "opendb",
       "arguments": {
         "args": [
-          "report-wire-length",
+          "get",
           "--input",
-          "design.odb"
+          "design.odb",
+          "--class",
+          "dbBlock",
+          "--field",
+          "get_name"
         ]
       },
       "expect": {
-        "result.total_wire_length_dbu": 706680
+        "result": "counter"
       }
     }
   ]
