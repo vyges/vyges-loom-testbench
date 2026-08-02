@@ -125,6 +125,27 @@ def main():
                           f"{skip_note} "
                           f"— choosing the tool and forming its arguments from the engine descriptors alone.")
 
+    # When no model was reachable, two things on this page would otherwise mislead:
+    # the standing claim that the model "gets it right", which nothing measured this
+    # run, and the absence of any explanation for why the AI column is blank.
+    agent_unreachable = bool(agent) and agent.get("unreachable", 0) >= agent.get("ran", 0) > 0
+    notice_html = ""
+    claim_html = ("<br><br>The model is a <b>stock, general-purpose LLM</b> — no fine-tuning, no "
+                  "training on these tools. It gets it right purely by reading each engine's "
+                  "self-description at runtime.")
+    if agent_unreachable:
+        notice_html = (
+            '<div class="notice"><b>The AI column is unavailable.</b> '
+            '<a href="https://github.blog/changelog/2026-07-30-github-models-is-now-retired/">'
+            'GitHub Models was retired on 30 July 2026</a> — the endpoint this demo used now '
+            'returns HTTP 410 for every model, so no model could be reached. We are evaluating '
+            'replacement providers to bring the live agent-driven demo back. '
+            'The <b>deterministic</b> column is unaffected: it uses no model, and still runs the '
+            'real engines end-to-end on a clean runner.</div>')
+        claim_html = ("<br><br>When a model is available, it is a <b>stock, general-purpose LLM</b> "
+                      "— no fine-tuning, no training on these tools; it routes purely by reading "
+                      "each engine's self-description at runtime.")
+
     rows = []
     for name in names:
         tool, task, inp = tasks.get(name, ("", "", ""))
@@ -166,6 +187,7 @@ def main():
   .explain {{ background: #8884; border-left: 3px solid #4f8cff; padding: .7rem 1rem;
              border-radius: 4px; font-size: .9rem; line-height: 1.55; }}
   .callout {{ background: #0a7c2f22; border-left: 3px solid #0a7c2f; padding: .7rem 1rem; border-radius: 4px; margin: 1rem 0; }}
+  .notice {{ background: #b4530922; border-left: 3px solid #b45309; padding: .7rem 1rem; border-radius: 4px; margin: 1rem 0; }}
   .meta {{ color: #888; font-size: .85rem; }}
   table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
   th, td {{ padding: .55rem .6rem; border-bottom: 1px solid #8883; vertical-align: middle; text-align: center; }}
@@ -199,9 +221,9 @@ def main():
   feed it</b>; the engine then executes for real and returns its own content-addressed result. The
   <b>deterministic</b> column replays known-good calls with no model. The intelligence is in the
   routing — the ground truth is reproducible without any AI.
-  <br><br>The model is a <b>stock, general-purpose LLM</b> — no fine-tuning, no training on these
-  tools. It gets it right purely by reading each engine's self-description at runtime.
+  {claim_html}
 </div>
+{notice_html}
 <div class="callout">{agent_line}</div>
 {chip_html}
 <table>
