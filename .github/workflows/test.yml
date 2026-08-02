@@ -25,12 +25,14 @@ on:
 
 permissions:
   contents: read
-  models: read
   pages: write
   id-token: write
 
 env:
-  MODEL: openai/gpt-4.1
+  # Groq free tier — OpenAI-compatible, supports forced tool calls.
+  # Replaces GitHub Models, retired 2026-07-30 (every model id now returns HTTP 410).
+  MODEL: llama-3.3-70b-versatile
+  LLM_ENDPOINT: https://api.groq.com/openai/v1
 
 jobs:
   deterministic:
@@ -77,9 +79,9 @@ jobs:
       - name: Agentic conformance (advisory) — ${{ env.MODEL }}
         continue-on-error: true          # advisory: a model miss / rate-limit never fails CI
         env:
-          GITHUB_TOKEN: ${{ secrets.MODELS_TOKEN || github.token }}
+          LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          python3 conformance.py cases.json --driver github --model "$MODEL" \
+          python3 conformance.py cases.json --driver openai --model "$MODEL" \
             --report "report-agentic.json" | tee out.txt
           { echo "## Agentic — $MODEL"; echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

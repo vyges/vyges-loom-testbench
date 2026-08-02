@@ -238,16 +238,26 @@ def driver_anthropic(case, tools, opts):
     raise RuntimeError("model returned no tool_use block")
 
 
-def driver_github(case, tools, opts):
-    """Drive **GitHub Models** (OpenAI-compatible tool-calling). Free for public
-    repos via the built-in `GITHUB_TOKEN` (needs `permissions: models: read`) — the
-    basis for a public conformance CI. Same honest test as `anthropic`: the whole
-    surface, temperature 0, forced tool call.
+def driver_openai(case, tools, opts):
+    """Drive any **OpenAI-compatible** chat/completions endpoint with tool-calling.
+
+    Provider-neutral on purpose: Groq, Cerebras, Mistral, NVIDIA NIM, xAI, a local
+    llama.cpp/vLLM — all speak this wire format, so switching provider is a key and
+    a URL, not a code change. (It was written for GitHub Models, which was retired
+    2026-07-30; the name no longer describes what it talks to.)
+
+      LLM_API_KEY   bearer token          (legacy: GITHUB_TOKEN, GITHUB_MODELS_TOKEN)
+      LLM_ENDPOINT  base URL, no /chat/completions suffix
+                                          (legacy: GITHUB_MODELS_ENDPOINT)
+
+    Same honest test as `anthropic`: the whole surface, temperature 0, forced tool call.
     """
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_MODELS_TOKEN")
+    token = (os.environ.get("LLM_API_KEY") or os.environ.get("GITHUB_TOKEN")
+             or os.environ.get("GITHUB_MODELS_TOKEN"))
     if not token:
-        raise RuntimeError("GITHUB_TOKEN (with models:read) not set (required for --driver github)")
-    endpoint = os.environ.get("GITHUB_MODELS_ENDPOINT", "https://models.github.ai/inference")
+        raise RuntimeError("LLM_API_KEY is not set (required for --driver openai)")
+    endpoint = (os.environ.get("LLM_ENDPOINT") or os.environ.get("GITHUB_MODELS_ENDPOINT")
+                or "https://api.groq.com/openai/v1")
     url = endpoint.rstrip("/") + "/chat/completions"
     # OpenAI function names disallow '.', which appears in composed tools (loom.feedback,
     # openroad.emap, txn.*). Sanitize for the request and map the reply back.
@@ -300,7 +310,9 @@ def driver_github(case, tools, opts):
     return namemap.get(fn["name"], fn["name"]), args
 
 
-DRIVERS = {"echo": driver_echo, "anthropic": driver_anthropic, "github": driver_github}
+# `github` kept as an alias so older invocations and docs keep working.
+DRIVERS = {"echo": driver_echo, "anthropic": driver_anthropic,
+           "openai": driver_openai, "github": driver_openai}
 
 
 # --------------------------------------------------------------------------- #
