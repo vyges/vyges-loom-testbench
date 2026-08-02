@@ -21,6 +21,9 @@ Driver modes:
 
 An LLM driver measures **descriptor legibility** (can a competent reader pick the
 tool + form args from ``--describe`` alone?) and yields a model-capability matrix.
+LLM drivers are seeded with the server's MCP ``instructions`` exactly as a real
+client would; ``--no-seed`` withholds it, so a paired run measures what the seed
+is worth. Measured against SemiKong-8B (2026-08-01): 0/5 unseeded, 5/5 seeded.
 Treat an LLM run as an **advisory** smoke test — model output isn't bit-reproducible,
 so don't hard-gate a release on it; the ``echo`` driver is the deterministic subset.
 
@@ -121,6 +124,10 @@ class McpServer:
             },
         )
         self.notify("notifications/initialized")
+        # MCP's own channel for orienting a model *before* it sees a tool. A real
+        # client prepends this to the system prompt, so the harness must too —
+        # otherwise we measure a surface no client actually presents.
+        self.instructions = (r.get("result") or {}).get("instructions") or ""
         return r
 
     def list_tools(self):
@@ -163,6 +170,7 @@ def driver_anthropic(case, tools, opts):
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (required for --driver anthropic)")
+    seed = opts.get("instructions") or ""
     api_tools = [
         {
             "name": t["name"],
@@ -179,6 +187,8 @@ def driver_anthropic(case, tools, opts):
         "tool_choice": {"type": "any"},  # force a tool call, no prose
         "messages": [{"role": "user", "content": case["task"]}],
     }
+    if seed:
+        body["system"] = seed
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=json.dumps(body).encode(),
@@ -219,11 +229,14 @@ def driver_github(case, tools, opts):
             "description": t.get("description", ""),
             "parameters": t.get("inputSchema") or {"type": "object", "properties": {}},
         }})
+    sysmsg = "You are a silicon sign-off agent. Call exactly one tool to accomplish the task."
+    if opts.get("instructions"):
+        sysmsg = opts["instructions"] + "\n\n" + sysmsg
     body = {
         "model": opts["model"],
         "temperature": 0,
         "messages": [
-            {"role": "system", "content": "You are a silicon sign-off agent. Call exactly one tool to accomplish the task."},
+            {"role": "system", "content": sysmsg},
             {"role": "user", "content": case["task"]},
         ],
         "tools": fns,
@@ -355,6 +368,9 @@ def run_case(case, driver_name, opts):
     try:
         srv.initialize()
         tools = srv.list_tools()
+        # `--no-seed` withholds the server's `instructions` to A/B what the seed buys.
+        opts = dict(opts, instructions="" if opts.get("no_seed") else srv.instructions)
+        rec["seeded"] = bool(opts["instructions"])
         called_tool, arguments = DRIVERS[driver_name](case, tools, opts)
         rec["called_tool"] = called_tool
         rec["arguments"] = arguments
@@ -384,9 +400,11 @@ def main(argv=None):
     ap.add_argument("--report", help="write a JSON report to this path")
     ap.add_argument("--list-tools", action="store_true", help="just print the advertised surface + inputSchemas and exit")
     ap.add_argument("--profile", default="core", help="VYGES_MCP_PROFILE for --list-tools")
+    ap.add_argument("--no-seed", action="store_true",
+                    help="withhold the server's MCP `instructions` from LLM drivers (A/B the seed)")
     args = ap.parse_args(argv)
 
-    opts = {"vyges_bin": args.vyges_bin, "model": args.model}
+    opts = {"vyges_bin": args.vyges_bin, "model": args.model, "no_seed": args.no_seed}
     if args.cases:
         opts["base_dir"] = os.path.dirname(os.path.abspath(args.cases))
 
