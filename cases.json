@@ -200,6 +200,41 @@
       "expect": {
         "result": "counter"
       }
+    },
+    {
+      "name": "opendb-chiplet-d2d",
+      "cwd": "fixtures/opendb-chiplet",
+      "profile": "core+opendb",
+      "task": "I have a 2.5D/3D chiplet assembly described in stack.3dbx. Verify that its die-to-die interfaces really connect — that the bumps on the two mating faces line up and carry the same signals.",
+      "tool": "opendb",
+      "arguments": {
+        "args": [
+          "check-d2d",
+          "--input",
+          "stack.3dbx"
+        ]
+      },
+      "expect": {
+        "result.violations": 0,
+        "result.interfaces_checked": 1
+      }
+    },
+    {
+      "name": "opendb-chiplet-structural",
+      "cwd": "fixtures/opendb-chiplet",
+      "profile": "core+opendb",
+      "task": "Run the structural checks on the chiplet assembly in stack.odb — overlapping dies, floating dies, bonding-face validity — and tell me how many violations there are.",
+      "tool": "opendb",
+      "arguments": {
+        "args": [
+          "check-3dblox",
+          "--input",
+          "stack.odb"
+        ]
+      },
+      "expect": {
+        "result.violations": 0
+      }
     }
   ]
 }
