@@ -23,7 +23,18 @@ An LLM driver measures **descriptor legibility** (can a competent reader pick th
 tool + form args from ``--describe`` alone?) and yields a model-capability matrix.
 LLM drivers are seeded with the server's MCP ``instructions`` exactly as a real
 client would; ``--no-seed`` withholds it, so a paired run measures what the seed
-is worth. Measured against SemiKong-8B (2026-08-01): 0/5 unseeded, 5/5 seeded.
+is worth. Two paired routing measurements, 2026-08-02, real `vyges mcp` surfaces:
+
+  SemiKong-8B (local, semiconductor-domain)   0/5  unseeded -> 5/5  seeded
+  Claude Sonnet, blind (no repo context)      9/10 unseeded -> 10/10 seeded
+
+Read together, not separately. The capable model already routed 9 of 10 from the
+*old* descriptor, so the big SemiKong jump measures model capability, not a
+descriptor that was failing. The one case the seed fixed is the honest signal:
+"draw me a cross-section of my multi-die package" went to `gds-view` (the layout
+viewer — a reasonable read of "draw") until `view-3dblox` was described with a
+verb instead of listed as a bare command name. n=1 sample per arm; routing only,
+not argument formation.
 Treat an LLM run as an **advisory** smoke test — model output isn't bit-reproducible,
 so don't hard-gate a release on it; the ``echo`` driver is the deterministic subset.
 
