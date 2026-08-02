@@ -16,8 +16,13 @@ Driver modes:
              must pick the right tool and form its arguments from the descriptor
              alone. Needs ``ANTHROPIC_API_KEY``.
 
-  github     Same, via **GitHub Models** (OpenAI-compatible tool-calling). Free for
-             public repos through ``GITHUB_TOKEN`` (``permissions: models: read``).
+  github     Same, via **GitHub Models** (OpenAI-compatible tool-calling), through
+             ``GITHUB_TOKEN`` (``permissions: models: read``).
+             **RETIRED 2026-07-30** — the catalog and inference endpoints now return
+             HTTP 410 for every model id, so there is no id to repoint this at. Kept
+             because the endpoint is configurable (``GITHUB_MODELS_ENDPOINT``) and the
+             wire format is plain OpenAI tool-calling, so it drives any compatible
+             server — a local llama.cpp/vLLM, or a hosted replacement — unchanged.
 
 An LLM driver measures **descriptor legibility** (can a competent reader pick the
 tool + form args from ``--describe`` alone?) and yields a model-capability matrix.
@@ -165,6 +170,21 @@ class McpServer:
 # --------------------------------------------------------------------------- #
 # Drivers — each returns (tool_name, arguments) for a case.
 # --------------------------------------------------------------------------- #
+
+
+def _is_unreachable(e):
+    """True when the driver never got an answer from a model.
+
+    HTTP 4xx/5xx from the provider, plus transport-level failures (DNS, TLS,
+    connection refused, timeout). A retired endpoint returning 410 must not be
+    reported as the model choosing badly — that is a claim about our tool
+    descriptors, and nothing measured it.
+    """
+    if isinstance(e, urllib.error.HTTPError):
+        return True
+    if isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError)):
+        return True
+    return isinstance(e, RuntimeError) and "not set (required for --driver" in str(e)
 
 
 def driver_echo(case, tools, _opts):
@@ -397,6 +417,10 @@ def run_case(case, driver_name, opts):
     except Exception as e:  # a driver/transport failure is a case failure, never a crash
         rec["checks"] = [("exception", False, f"{type(e).__name__}: {e}")]
         rec["passed"] = False
+        # Distinguish "the model answered wrong" from "we never reached a model".
+        # A dead endpoint is not evidence about our descriptors, and scoring it as
+        # 0/N publishes a verdict on them that nothing measured.
+        rec["unreachable"] = _is_unreachable(e)
     finally:
         srv.close()
     return rec
@@ -440,14 +464,18 @@ def main(argv=None):
     ran = [r for r in records if not r.get("skipped")]
     skipped = [r for r in records if r.get("skipped")]
     npass = sum(1 for r in ran if r["passed"])
+    # A case that never reached a model is not a case the model got wrong.
+    unreachable = [r for r in ran if r.get("unreachable")]
     print(f"\nagentic-conformance · driver={args.driver} · "
-          f"{npass}/{len(ran)} passed · {len(skipped)} skipped\n")
+          f"{npass}/{len(ran)} passed · {len(skipped)} skipped"
+          + (f" · {len(unreachable)} UNREACHABLE (no model was reached)" if unreachable else "")
+          + "\n")
     print(f"{'RESULT':6}  {'CASE':32}  {'CALLED':14}  DETAIL")
     for r in records:
         if r.get("skipped"):
             print(f"{'SKIP':6}  {r['name']:32}  {'-':14}  {r['reason']}")
             continue
-        badge = "PASS" if r["passed"] else "FAIL"
+        badge = "N/A" if r.get("unreachable") else ("PASS" if r["passed"] else "FAIL")
         called = r.get("called_tool", "-")
         fail_detail = "; ".join(f"{n}={d}" for n, ok, d in r.get("checks", []) if not ok) or "ok"
         print(f"{badge:6}  {r['name']:32}  {called:14}  {fail_detail}")
@@ -460,6 +488,7 @@ def main(argv=None):
         "passed": npass,
         "ran": len(ran),
         "skipped": len(skipped),
+        "unreachable": len(unreachable),
         "total": len(records),
         "cases": [
             {**r, "checks": [{"check": n, "ok": ok, "detail": d} for n, ok, d in r.get("checks", [])]}

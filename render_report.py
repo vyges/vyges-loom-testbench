@@ -107,10 +107,23 @@ def main():
             skip_note = f" ({nskip} skipped — {html.escape(reasons[0])})"
         else:
             skip_note = f" ({nskip} skipped)"
-        agent_line = (f"The AI agent (<b>{html.escape(str(agent.get('model')))}</b>) drove "
-                      f"<b>{agent.get('passed', 0)}/{agent.get('ran', 0)}</b> engines correctly{via}"
-                      f"{skip_note} "
-                      f"— choosing the tool and forming its arguments from the engine descriptors alone.")
+        # If every case failed because no model was reachable (retired endpoint, missing
+        # key, network), say exactly that. Rendering it as "0/N correct" would publish a
+        # verdict on our tool descriptors that nothing measured — the descriptors were
+        # never shown to anything.
+        nunreach = agent.get("unreachable", 0)
+        if nunreach and nunreach >= agent.get("ran", 0) > 0:
+            # `via` describes the vyges build the engines ran under — irrelevant here, and
+            # it reads as though the model were reached *through* vyges. Drop it.
+            agent_line = (f"The AI agent (<b>{html.escape(str(agent.get('model')))}</b>) could "
+                          f"<b>not be reached</b> — no model answered, so this run measured "
+                          f"nothing about the engine descriptors.{skip_note} "
+                          f"The deterministic column above is unaffected.")
+        else:
+            agent_line = (f"The AI agent (<b>{html.escape(str(agent.get('model')))}</b>) drove "
+                          f"<b>{agent.get('passed', 0)}/{agent.get('ran', 0)}</b> engines correctly{via}"
+                          f"{skip_note} "
+                          f"— choosing the tool and forming its arguments from the engine descriptors alone.")
 
     rows = []
     for name in names:
