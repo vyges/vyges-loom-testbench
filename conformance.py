@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import select
 import subprocess
 import sys
@@ -172,6 +173,20 @@ class McpServer:
 # --------------------------------------------------------------------------- #
 
 
+USER_AGENT = "vyges-loom-testbench/0.1 (+https://github.com/vyges/vyges-loom-testbench)"
+
+
+class ModelChoseUnknownTool(Exception):
+    """The model named a tool that was not in the advertised surface.
+
+    A real answer, and a wrong one — never an unreachable provider.
+    """
+
+    def __init__(self, name):
+        self.tool = name
+        super().__init__(f"model called '{name}', which was not in the advertised surface")
+
+
 def _is_unreachable(e):
     """True when the driver never got an answer from a model.
 
@@ -180,6 +195,8 @@ def _is_unreachable(e):
     reported as the model choosing badly — that is a claim about our tool
     descriptors, and nothing measured it.
     """
+    if isinstance(e, ModelChoseUnknownTool):
+        return False  # the model answered; it just named a tool we never advertised
     if isinstance(e, urllib.error.HTTPError):
         return True
     if isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError)):
@@ -283,12 +300,17 @@ def driver_openai(case, tools, opts):
         "tools": fns,
         "tool_choice": "required",
     }
+    # Identify ourselves. urllib's default UA is "Python-urllib/3.x", which Groq's WAF
+    # rejects outright with Cloudflare error 1010 (banned browser signature) — a 403 that
+    # looks like a bad key and is not one. Say who we actually are; don't impersonate a
+    # browser or curl to get around it.
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
-        headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
+        headers={"content-type": "application/json", "authorization": f"Bearer {token}",
+                 "User-Agent": USER_AGENT},
         method="POST",
     )
-    # Free-tier GitHub Models is rate-limited; retry on 429, honoring Retry-After.
+    # Free tiers are rate-limited; retry on 429, honoring Retry-After.
     data = None
     for attempt in range(6):
         try:
@@ -300,6 +322,18 @@ def driver_openai(case, tools, opts):
                 wait = int(e.headers.get("Retry-After", 0) or 0) or (2 ** attempt)
                 time.sleep(min(wait, 60))
                 continue
+            # Some providers validate the tool call server-side and reject a hallucinated
+            # name with 400 `tool_use_failed`. The model DID answer — it named a tool that
+            # was never advertised. Reporting that as "unreachable" would excuse a model
+            # failure as an outage, so surface it as the wrong answer it is.
+            if e.code == 400:
+                try:
+                    err = json.loads(e.read()).get("error", {})
+                except Exception:
+                    err = {}
+                if err.get("code") == "tool_use_failed":
+                    m = re.search(r"attempted to call tool '([^']+)'", err.get("message", ""))
+                    raise ModelChoseUnknownTool(m.group(1) if m else "?") from None
             raise
     calls = (data.get("choices", [{}])[0].get("message", {}) or {}).get("tool_calls") or []
     if not calls:
