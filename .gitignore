@@ -2,3 +2,11 @@ report*.json
 out.txt
 __pycache__/
 *.pyc
+
+# Never commit provider credentials. This repo is public and the agentic driver
+# takes an API key; a stray .env or *.key must not be committable by accident.
+.env
+.env.*
+*.key
+*.pem
+secrets.json
