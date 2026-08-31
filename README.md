@@ -69,6 +69,22 @@ descriptors alone — a legibility test as much as a functional one.
 Model access uses a `models: read` token via the `MODELS_TOKEN` secret (falls back to the
 Actions token where the org has GitHub Models enabled).
 
+## Construction, driven from a shell
+
+The engines above are read-only and are driven through `vyges mcp`. [`flows/`](./flows) is the
+other half — the **construction** engines, driven from an ordinary shell script with no MCP and no
+model in the loop:
+
+```sh
+./flows/floorplan.sh --netlist build/my_block.v --die-area '0 0 700 700'
+```
+
+`import → ifp → make-tracks → tap → global-connect → pdn` — six steps, four static binaries, no
+OpenROAD, with the PDK resolved through `vyges pdk-store`. [`flows/edge-sensor-demo.sh`](./flows/edge-sensor-demo.sh)
+is a thin wrapper that runs it on a **taped-out** block of the
+[Vyges edge-sensor SoC](https://github.com/vyges/vyges-edge-sensor-soc) and checks the rows and
+tracks it produces against the silicon.
+
 ## Coverage
 
 The read-only engines listed above run against bundled Apache-2.0 fixtures under [`fixtures/`](./fixtures).
