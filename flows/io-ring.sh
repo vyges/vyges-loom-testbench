@@ -96,8 +96,12 @@ done
 
 mkdir -p "$OUT"
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+# ⚠️ `step` is incremented INSIDE a command substitution, and a subshell's variables do not come
+# back. Assigned through a substitution, every file came out named `1.foo.odb` -- harmless until you
+# try to read the run directory in order, which is the one thing the numbering is for. Assign to
+# `CUR` directly instead, so the increment happens in this shell.
 step=0
-next() { step=$((step+1)); echo "$OUT/$step.$1.odb"; }
+next() { step=$((step+1)); CUR="$OUT/$(printf '%03d' "$step").$1.odb"; }
 
 say "engines"
 echo "  pad     $PAD"
@@ -105,12 +109,12 @@ echo "  opendb  $ODB"
 echo "  pdn     $PDN"
 
 say "1 · import — LEF and the flip-chip DEF into a database"
-CUR=$(next imported)
+next imported
 lefargs=(); for l in "${LEFS[@]}"; do lefargs+=(--lef "$l"); done
 "$ODB" import "${lefargs[@]}" --def "$DEF" --output "$CUR"
 
 say "2 · make-io-sites — the ring of IO rows around the die"
-PREV=$CUR; CUR=$(next sites)
+PREV=$CUR; next sites
 "$PAD" make-io-sites "$PREV" --horizontal-site "$H_SITE" --vertical-site "$V_SITE" \
   --corner-site "$CORNER_SITE" --offset "$OFFSET" --out-odb "$CUR"
 
@@ -121,7 +125,7 @@ if [ -n "$PADS" ]; then
   # single instance. Reading the list from a file keeps design data out of the flow.
   while read -r row loc master inst mirror; do
     case "$row" in ''|'#'*) continue ;; esac
-    PREV=$CUR; CUR=$(next "pad_$inst")
+    PREV=$CUR; next "pad_$inst"
     "$PAD" place-pad "$PREV" --row "$row" --location "$loc" --master "$master" \
       --inst "$inst" ${mirror:+--mirror} --out-odb "$CUR"
     n=$((n+1))
@@ -135,32 +139,32 @@ fi
 # matched onto those nets. Running it later gets `no net named DVSS`, which is how this was found.
 if [ ${#CONNECT[@]} -gt 0 ]; then
   say "4 · global-connect — create the supply nets and tie the pads' pins to them"
-  PREV=$CUR; CUR=$(next connected)
+  PREV=$CUR; next connected
   cargs=(); for c in "${CONNECT[@]}"; do cargs+=(--connect "$c"); done
   "$PDN" global-connect "$PREV" "${cargs[@]}" --out-odb "$CUR"
 fi
 
 if [ -n "$CORNER_MASTER" ]; then
   say "5 · place-corners — the four corner cells"
-  PREV=$CUR; CUR=$(next corners)
+  PREV=$CUR; next corners
   "$PAD" place-corners "$PREV" --master "$CORNER_MASTER" --out-odb "$CUR"
 fi
 
 if [ -n "$FILL_MASTERS" ]; then
   say "6 · place-io-fill — close the gaps between pads"
   for row in IO_SOUTH IO_WEST IO_NORTH IO_EAST; do
-    PREV=$CUR; CUR=$(next "fill_$row")
+    PREV=$CUR; next "fill_$row"
     "$PAD" place-io-fill "$PREV" --row "$row" --masters "$FILL_MASTERS" --out-odb "$CUR"
   done
 fi
 
 say "7 · connect-by-abutment — the ring's own supply nets"
-PREV=$CUR; CUR=$(next abutted)
+PREV=$CUR; next abutted
 "$PAD" connect-by-abutment "$PREV" --out-odb "$CUR"
 
 if [ -n "$BUMP" ] && [ "$BUMP_ROWS" -gt 0 ]; then
   say "8 · make-io-bump-array — the bump grid"
-  PREV=$CUR; CUR=$(next bumps)
+  PREV=$CUR; next bumps
   "$PAD" make-io-bump-array "$PREV" --bump "$BUMP" --origin "$BUMP_ORIGIN" \
     --rows "$BUMP_ROWS" --columns "$BUMP_COLS" --pitch "$BUMP_PITCH" --out-odb "$CUR"
 fi
@@ -170,7 +174,7 @@ if [ -n "$ASSIGN" ]; then
   n=0
   while read -r bump net terminal dont; do
     case "$bump" in ''|'#'*) continue ;; esac
-    PREV=$CUR; CUR=$(next "assign_$bump")
+    PREV=$CUR; next "assign_$bump"
     # ⚠️ `-` is how the file says "no terminal", because a positional field cannot be empty.
     [ "${terminal:-}" = "-" ] && terminal=
     "$PAD" assign-io-bump "$PREV" --bump "$bump" --net "$net" \
@@ -197,7 +201,7 @@ else
 fi
 
 say "10 · rdl-route — bumps to pads across the face of the die"
-PREV=$CUR; CUR=$(next routed)
+PREV=$CUR; next routed
 # ⚠️ Not swallowed, and not allowed to abort either -- those are different things.
 #
 # 🔑 The reference writes the database FIRST and raises the error AFTER, so the wires it did manage
