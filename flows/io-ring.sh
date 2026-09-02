@@ -198,16 +198,32 @@ fi
 
 say "10 · rdl-route — bumps to pads across the face of the die"
 PREV=$CUR; CUR=$(next routed)
-# ⚠️ Not swallowed. rdl-route exits non-zero when a net is left unrouted, and a floorplan you
-# cannot finish routing is not a pass.
+# ⚠️ Not swallowed, and not allowed to abort either -- those are different things.
+#
+# 🔑 The reference writes the database FIRST and raises the error AFTER, so the wires it did manage
+# to route survive the failure. `rdl-route` does the same and still exits non-zero. If `set -e`
+# aborted here, the DEF would never be written and the partial result -- the thing you need in
+# order to see WHY it failed -- would be thrown away at exactly the moment it matters.
+#
+# So: keep the status, finish the flow, exit with it.
+rdl_status=0
 "$PAD" rdl-route "$PREV" --layer "$RDL_LAYER" --width "$RDL_WIDTH" --spacing "$RDL_SPACING" \
-  $ALLOW45 --nets '*' --out-odb "$CUR"
+  $ALLOW45 --nets '*' --out-odb "$CUR" || rdl_status=$?
 
 say "11 · write the DEF"
 "$ODB" write-def --input "$CUR" --output "$OUT/io-ring.def"
+
+if [ "$rdl_status" -ne 0 ]; then
+  echo
+  echo "FAILED: rdl-route exited $rdl_status -- nets were left unrouted." >&2
+  echo "        The partial floorplan is in $OUT/io-ring.def for inspection." >&2
+fi
 
 say "result — $OUT/io-ring.def"
 awk '/^COMPONENTS/{c=$2} /^SPECIALNETS/{s=$2} END{printf "  components %s\n  special nets %s\n", c, s}' "$OUT/io-ring.def"
 # ⚠️ `grep -c` exits 1 on no matches, which under `set -o pipefail` would fail the script on its
 # very last line -- reporting a routing failure as a flow crash. Count without letting it.
 printf '  routed wire statements %s\n' "$(grep -c 'ROUTED\|NEW\|FIXED' "$OUT/io-ring.def" || true)"
+
+# ⛔ The flow's own exit status IS the router's. A partial DEF on disk is not a pass.
+exit "$rdl_status"
