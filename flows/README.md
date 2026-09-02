@@ -8,10 +8,11 @@ script with no MCP and no model in the loop. What is being shown is not tool cho
 engines compose — each one reading what the previous one wrote — and that the result matches
 silicon.
 
-There are two scripts. [`floorplan.sh`](./floorplan.sh) is the tool — point it at your own
+There are three scripts. [`floorplan.sh`](./floorplan.sh) is the tool — point it at your own
 netlist. [`edge-sensor-demo.sh`](./edge-sensor-demo.sh) is a thin wrapper over it that runs a
 taped-out block and checks the answer against silicon, so the demo exercises the same code path a
-developer would use rather than a parallel copy of it.
+developer would use rather than a parallel copy of it. [`io-ring.sh`](./io-ring.sh) does the other
+half of the die — the IO ring and the RDL that reaches it.
 
 ## [`floorplan.sh`](./floorplan.sh) — your design
 
@@ -92,3 +93,40 @@ These scripts are Apache-2.0 — see [LICENSE](../LICENSE) and [NOTICE](../NOTIC
 The engines they invoke and the PDK they resolve are separate: each carries its own terms, from
 its own repository or its own supplier. Nothing here relicenses them, and the PDK in particular
 may well be one you cannot redistribute at all.
+
+## [`io-ring.sh`](./io-ring.sh) — the ring, and the RDL across the face of the die
+
+`floorplan.sh` builds what is inside the core. This builds what is around it:
+
+```text
+make-io-sites → place-pad → global-connect → place-corners → place-io-fill
+              → connect-by-abutment → make-io-bump-array → assign-io-bump → rdl-route
+```
+
+Nine steps, three static binaries — `pad` does seven of them, `pdn` the supply nets, `opendb` the
+file I/O.
+
+Three of the steps are **per-design data**, and the script reads them from files rather than
+inventing them:
+
+| flag | one line per | fields |
+| --- | --- | --- |
+| `--pads` | pad | `ROW  LOCATION  MASTER  INST  [mirror]` |
+| `--assign` | bump | `BUMP  NET  [TERMINAL_INST/PIN \| -]  [dont_route]` |
+| `--connect` | rule (repeatable) | `NET:PINPAT:INSTPAT:power\|ground\|signal` |
+
+```sh
+./flows/io-ring.sh --def my_flipchip.def --lef tech.lef --lef io_cells.lef \
+  --h-site IOSITE --v-site IOSITE --corner-site IOSITE --corner-master PAD_CORNER \
+  --pads pads.txt --connect 'VDD:VDD:.*:power' --connect 'VSS:VSS:.*:ground' \
+  --bump DUMMY_BUMP --bump-origin '210.0 215.0' --bump-pitch '160 160' \
+  --bump-rows 17 --bump-columns 17 --assign bumps.txt --rdl-layer metal10
+```
+
+On a 238-pad flip-chip that is 934 fill cells, 289 bumps, 279 assignments and **273 of 273 nets
+routed** in one iteration — 1499 components and 3454 routed wire statements out.
+
+**The exit status is the router's.** If nets are left unrouted the script says so, still writes the
+partial DEF so you can see *where* it ran out of room, and exits non-zero. Squeeze the same design
+to `--rdl-width 40 --rdl-spacing 40` and it places 4 of 273 and exits 1. A floorplan you cannot
+finish routing is not a pass, and this script does not round it up to one.

@@ -85,6 +85,11 @@ is a thin wrapper that runs it on a **taped-out** block of the
 [Vyges edge-sensor SoC](https://github.com/vyges/vyges-edge-sensor-soc) and checks the rows and
 tracks it produces against the silicon.
 
+[`flows/io-ring.sh`](./flows/io-ring.sh) does the other half of the die — the IO ring and the RDL
+that reaches it. Nine steps and three binaries, from `make-io-sites` through `rdl-route`; on a
+238-pad flip-chip, 273 of 273 nets routed. Its exit status is the router's: leave a net unrouted
+and it writes the partial DEF, says so, and exits non-zero.
+
 ## Coverage
 
 The read-only engines listed above run against bundled Apache-2.0 fixtures under [`fixtures/`](./fixtures).
