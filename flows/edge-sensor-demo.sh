@@ -87,7 +87,10 @@ PY
 SILICON=$REPO/def/$DESIGN.def
 [ -f "$SILICON" ] && PASS+=(--check-def "$SILICON")
 
+# "${PASS[@]}" alone is an unbound-variable error on an EMPTY array under `set -u` in bash 3.2,
+# which is what macOS still ships. The +alternate form expands to nothing when the array is
+# empty and to the quoted elements otherwise, so it is correct on both bash 3.2 and bash 5.
 exec "$(dirname "${BASH_SOURCE[0]}")/floorplan.sh" \
   --netlist "$NETLIST" --die-area "$DIE" --margins "$MARGINS" --site "$SITE" \
   --rail "$RAIL" --vstripe "$VSTRIPE" --hstripe "$HSTRIPE" \
-  --strip-physical --out "$OUT" "${PASS[@]}"
+  --strip-physical --out "$OUT" "${PASS[@]+"${PASS[@]}"}"
