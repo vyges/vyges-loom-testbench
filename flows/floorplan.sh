@@ -124,8 +124,11 @@ eng() {
   echo "$p"
 }
 IFP=$(eng ifp); TAP=$(eng tap); PDN=$(eng pdn); ODB=$(eng opendb)
-STORE=$(command -v vyges-pdk-store 2>/dev/null || true)
-[ -x "$STORE" ] || { echo "error: vyges-pdk-store not found; install it with 'vyges install loom'." >&2; exit 1; }
+# The store comes from the same place as the engines: with --bin, from that directory. It was
+# looked up on PATH alone, so a machine that keeps ~/.vyges/bin off PATH and passes --bin found
+# every engine and then stopped here.
+if [ -n "$BIN" ]; then STORE=$BIN/vyges-pdk-store; else STORE=$(command -v vyges-pdk-store 2>/dev/null || true); fi
+[ -x "$STORE" ] || { echo "error: vyges-pdk-store not found; install it with 'vyges install loom', or pass --bin <dir>." >&2; exit 1; }
 
 [ -n "$NETLIST" ] || { echo "error: --netlist <gate-level.v> is required." >&2; exit 2; }
 [ -f "$NETLIST" ] || { echo "error: no such netlist: $NETLIST" >&2; exit 2; }
