@@ -28,7 +28,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Which script owns which option, and whether it takes a value. Shared options go to all of them.
-PLACE_VAL=" --clock-port --clock-period --io-delay --sdc --io-hlayer --io-vlayer --signal-rc-layer \
+PLACE_VAL=" --clock-port --clock-period --io-delay --sdc --density --io-hlayer --io-vlayer --signal-rc-layer \
 --clock-rc-layer --slew-margin --cap-margin --clock-buffers --root-buffer --corner "
 PLACE_FLAG=" --skip-repair --ideal-clock "
 ROUTE_VAL=" --min-layer --max-layer --adjustment "

@@ -103,19 +103,20 @@ SILICON=$REPO/def/$DESIGN.def
 # empty and to the quoted elements otherwise, so it is correct on both bash 3.2 and bash 5.
 if [ "$THROUGH" != floorplan ]; then
   # The place and route settings, from the same file.
-  IFS="|" read -r CLK PERIOD IOH IOV RTMIN RTMAX ADJ < <("$PY" - "$CONFIG" <<'PY'
+  IFS="|" read -r CLK PERIOD IOH IOV RTMIN RTMAX ADJ DENS < <("$PY" - "$CONFIG" <<'PY'
 import json, sys
 c = json.load(open(sys.argv[1]))
 print(c["CLOCK_PORT"] if isinstance(c["CLOCK_PORT"], str) else c["CLOCK_PORT"][0], c["CLOCK_PERIOD"],
       c.get("FP_IO_HLAYER", "met3"), c.get("FP_IO_VLAYER", "met2"),
-      c.get("RT_MIN_LAYER", "met1"), c.get("RT_MAX_LAYER", "met4"), c.get("GRT_ADJUSTMENT", 0.3), sep="|")
+      c.get("RT_MIN_LAYER", "met1"), c.get("RT_MAX_LAYER", "met4"), c.get("GRT_ADJUSTMENT", 0.3),
+      c.get("PL_TARGET_DENSITY_PCT", 70) / 100, sep="|")
 PY
 )
-  [ -n "$ADJ" ] || { echo "error: could not read the place and route settings from $CONFIG" >&2; exit 2; }
+  [ -n "$DENS" ] || { echo "error: could not read the place and route settings from $CONFIG" >&2; exit 2; }
   exec "$(dirname "${BASH_SOURCE[0]}")/implement.sh" --through "$THROUGH" \
     --netlist "$NETLIST" --die-area "$DIE" --margins "$MARGINS" --site "$SITE" \
     --rail "$RAIL" --vstripe "$VSTRIPE" --hstripe "$HSTRIPE" --strip-physical --out "$OUT" \
-    --clock-port "$CLK" --clock-period "$PERIOD" --io-hlayer "$IOH" --io-vlayer "$IOV" \
+    --clock-port "$CLK" --clock-period "$PERIOD" --density "$DENS" --io-hlayer "$IOH" --io-vlayer "$IOV" \
     --min-layer "$RTMIN" --max-layer "$RTMAX" --adjustment "$ADJ" "${PASS[@]+"${PASS[@]}"}"
 fi
 exec "$(dirname "${BASH_SOURCE[0]}")/floorplan.sh" \

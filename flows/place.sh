@@ -9,6 +9,7 @@
 # Place a floorplanned design with the Vyges Loom engines.
 #
 #     io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts
+#             ->  dpl legalize (the clock buffers)  ->  dpl check
 #
 # The input is a floorplan: the DEF ./floorplan.sh writes, or any DEF with rows, tracks and a
 # power grid. The output is a legal placement, as a database and a DEF, ready for ./route.sh.
@@ -21,6 +22,7 @@
 #   --clock-period NS     its period, nanoseconds               (required unless --sdc is given)
 #   --io-delay PCT        input/output delay, percent of the period, for the generated SDC (default 20)
 #   --sdc FILE            use these constraints instead of generating them
+#   --density D           global placement target density, 0..1  (default: the placer's, 0.7)
 #   --io-hlayer L         layer for pins on the left/right edges   (default met3)
 #   --io-vlayer L         layer for pins on the top/bottom edges   (default met2)
 #   --signal-rc-layer L   layer whose RC estimates signal wires    (default met2)
@@ -43,7 +45,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEF= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC=
 IO_H=met3 IO_V=met2 SIG_RC=met2 CLK_RC=met5 SLEW=20 CAP=20
 CLKBUFS='sky130_fd_sc_hd__clkbuf_4 sky130_fd_sc_hd__clkbuf_8' ROOTBUF=sky130_fd_sc_hd__clkbuf_16
-SKIP_REPAIR=0 IDEAL_CLOCK=0
+SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY=
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -53,6 +55,7 @@ while [ $# -gt 0 ]; do
     --clock-period) CLOCK_PERIOD=$2; shift 2 ;;
     --io-delay)     IO_DELAY=$2; shift 2 ;;
     --sdc)          SDC=$2; shift 2 ;;
+    --density)      DENSITY=$2; shift 2 ;;
     --io-hlayer)    IO_H=$2; shift 2 ;;
     --io-vlayer)    IO_V=$2; shift 2 ;;
     --signal-rc-layer) SIG_RC=$2; shift 2 ;;
@@ -124,10 +127,12 @@ PY
 runq "$ODB" custom-io-placement --input "$OUT/p1.floorplan.odb" --output "$OUT/p1.io.odb" --config "$OUT/p1.io.json"
 
 # 2 ── global placement ──────────────────────────────────────────────────────────────────────
+GPL_ARGS=
+[ -n "$DENSITY" ] && GPL_ARGS="\"-density\", \"$DENSITY\""
 step "2 · gpl — global placement"
 cat > "$OUT/p2.gpl.job.json" <<EOF
 {"steps": [{"cmd": "read_db", "args": ["$OUT/p1.io.odb"]},
-           {"cmd": "global_placement", "args": ["-skip_nesterov_place"]}],
+           {"cmd": "global_placement", "args": [$GPL_ARGS]}],
  "write_def": "$OUT/p2.gpl.def"}
 EOF
 runq "$GPL" global_placement "$OUT/p2.gpl.job.json" -o "$OUT/p2.gpl.json" || {
@@ -178,7 +183,8 @@ cat > "$OUT/p6.cts.job.json" <<EOF
 {"steps": [{"cmd": "read_db", "args": ["$OUT/p4.legal.odb"]},
            {"cmd": "read_liberty", "args": ["$LIBERTY"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
            {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
-           {"cmd": "clock_tree_synthesis", "args": ["-root_buf", "$ROOTBUF", "-buf_list", "$CLKBUFS"]}]}
+           {"cmd": "clock_tree_synthesis", "args": ["-root_buf", "$ROOTBUF", "-buf_list", "$CLKBUFS"]}],
+ "write_db": "$OUT/p6.cts.odb"}
 EOF
 rc=0; "$CTS" clock_tree_synthesis "$OUT/p6.cts.job.json" -o "$OUT/p6.cts.json" 2>/dev/null || rc=$?
 echo "  cts: $(jget "$OUT/p6.cts.json" status) — $(jget "$OUT/p6.cts.json" clock_nets) clock nets found"
@@ -192,8 +198,22 @@ if [ "$rc" -ne 0 ]; then
   fi
 fi
 
+# 7 ── the clock buffers onto legal sites ──────────────────────────────────────────────────────
+FINAL=$OUT/p4.legal.odb
+if [ "$rc" -eq 0 ]; then
+  step "7 · dpl — the clock tree's buffers onto legal sites"
+  "$DPL" detailed-placement "$OUT/p6.cts.odb" --out-odb "$OUT/p7.legal.odb" \
+         > "$OUT/p7.dpl.json" 2> >(sed 's/^/  /' >&2)
+  echo "  $(jget "$OUT/p7.dpl.json" status): $(jget "$OUT/p7.dpl.json" moved) of $(jget "$OUT/p7.dpl.json" cells) cells moved ($(jget "$OUT/p7.dpl.json" legalizer) legalizer)"
+  step "8 · dpl check-placement — every rule family, with the clock tree"
+  crc=0; runq "$DPL" check-placement "$OUT/p7.legal.odb" -o "$OUT/p8.check.json" || crc=$?
+  echo "  $(jget "$OUT/p8.check.json" status): $(jget "$OUT/p8.check.json" violations) violations over $(jget "$OUT/p8.check.json" cells_checked) cells"
+  [ "$crc" -eq 0 ] || exit "$crc"
+  FINAL=$OUT/p7.legal.odb
+fi
+
 # ── what came out ───────────────────────────────────────────────────────────────────────────
-cp "$OUT/p4.legal.odb" "$OUT/placed.odb"
+cp "$FINAL" "$OUT/placed.odb"
 runq "$ODB" write-def --input "$OUT/placed.odb" --output "$OUT/placed.def"
 step "result — $OUT/placed.odb (and placed.def)"
 printf '  %-14s %s\n' \
