@@ -24,16 +24,24 @@
 #   --repo DIR      a clone of vyges-edge-sensor-soc      (default: $PWD)
 #   --design NAME   any block under its signoff/          (default: rv_plic_lite)
 #   --out DIR       where to write                        (default: ./build)
-#   ...any other option is passed through to ./floorplan.sh (--pdk, --pdk-root, --bin, ...)
+#   --through STAGE floorplan (default), place or route — how far to take the block
+#   ...any other option is passed through (--pdk, --pdk-root, --bin, --skip-repair, --ideal-clock, ...)
+#
+# --through place|route goes on through ./implement.sh. Past the floorplan the netlist is the
+# block's <name>.nl.v — the one an open flow hands to placement, without the supply ports a
+# powered netlist carries — and the clock, IO layers, routing layers and global-routing adjustment
+# are read from the same resolved.json. Today that needs --skip-repair --ideal-clock: see
+# ./place.sh.
 #
 set -euo pipefail
 
-REPO=${VYGES_DESIGN_REPO:-$PWD} DESIGN=rv_plic_lite OUT=build PASS=()
+REPO=${VYGES_DESIGN_REPO:-$PWD} DESIGN=rv_plic_lite OUT=build THROUGH=floorplan PASS=()
 while [ $# -gt 0 ]; do
   case $1 in
     --repo)   REPO=$2; shift 2 ;;
     --design) DESIGN=$2; shift 2 ;;
     --out)    OUT=$2; shift 2 ;;
+    --through) THROUGH=$2; shift 2 ;;
     -h|--help) awk '!/^#/ && NR>1 {exit} /SPDX|©|licensed under the Apache|apache[.]org/ {next} NR>1 {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" | sed '/./,$!d'; exit 0 ;;
     *) PASS+=("$1"); shift ;;
   esac
@@ -46,6 +54,9 @@ done
 [ -n "$PY" ] || { echo "error: no python3 on PATH." >&2; exit 2; }
 
 NETLIST=$REPO/verilog/gl/$DESIGN.v
+# Placement wants the unpowered netlist: VPWR/VGND as ports are inout, and the supply nets are
+# made by global-connect anyway.
+[ "$THROUGH" != floorplan ] && [ -f "$REPO/verilog/gl/$DESIGN.nl.v" ] && NETLIST=$REPO/verilog/gl/$DESIGN.nl.v
 CONFIG=$REPO/signoff/$DESIGN/openlane-signoff/resolved.json
 for f in "$NETLIST" "$CONFIG"; do
   [ -f "$f" ] || {
@@ -90,6 +101,23 @@ SILICON=$REPO/def/$DESIGN.def
 # "${PASS[@]}" alone is an unbound-variable error on an EMPTY array under `set -u` in bash 3.2,
 # which is what macOS still ships. The +alternate form expands to nothing when the array is
 # empty and to the quoted elements otherwise, so it is correct on both bash 3.2 and bash 5.
+if [ "$THROUGH" != floorplan ]; then
+  # The place and route settings, from the same file.
+  IFS="|" read -r CLK PERIOD IOH IOV RTMIN RTMAX ADJ < <("$PY" - "$CONFIG" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))
+print(c["CLOCK_PORT"] if isinstance(c["CLOCK_PORT"], str) else c["CLOCK_PORT"][0], c["CLOCK_PERIOD"],
+      c.get("FP_IO_HLAYER", "met3"), c.get("FP_IO_VLAYER", "met2"),
+      c.get("RT_MIN_LAYER", "met1"), c.get("RT_MAX_LAYER", "met4"), c.get("GRT_ADJUSTMENT", 0.3), sep="|")
+PY
+)
+  [ -n "$ADJ" ] || { echo "error: could not read the place and route settings from $CONFIG" >&2; exit 2; }
+  exec "$(dirname "${BASH_SOURCE[0]}")/implement.sh" --through "$THROUGH" \
+    --netlist "$NETLIST" --die-area "$DIE" --margins "$MARGINS" --site "$SITE" \
+    --rail "$RAIL" --vstripe "$VSTRIPE" --hstripe "$HSTRIPE" --strip-physical --out "$OUT" \
+    --clock-port "$CLK" --clock-period "$PERIOD" --io-hlayer "$IOH" --io-vlayer "$IOV" \
+    --min-layer "$RTMIN" --max-layer "$RTMAX" --adjustment "$ADJ" "${PASS[@]+"${PASS[@]}"}"
+fi
 exec "$(dirname "${BASH_SOURCE[0]}")/floorplan.sh" \
   --netlist "$NETLIST" --die-area "$DIE" --margins "$MARGINS" --site "$SITE" \
   --rail "$RAIL" --vstripe "$VSTRIPE" --hstripe "$HSTRIPE" \

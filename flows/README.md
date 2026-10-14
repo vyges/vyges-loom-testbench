@@ -80,6 +80,62 @@ power shapes cannot, because placement, CTS and routing all change them.
 For `fft_ctrl_tlul` — 42,270 cells — all 543 rows and all 12 track records are identical to the
 DEF that was taped out.
 
+## [`place.sh`](./place.sh), [`route.sh`](./route.sh), [`implement.sh`](./implement.sh) — past the floorplan
+
+The floorplan is the first third of a block. These take it the rest of the way, in the same style:
+one numbered step per engine, each reading what the last one wrote.
+
+```text
+place.sh      io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts
+route.sh      grt  ->  drt  ->  write DEF  ->  ant
+implement.sh  floorplan.sh  ->  place.sh  ->  route.sh
+```
+
+```sh
+./flows/implement.sh --netlist build/my_block.v --die-area '0 0 400 400' \
+                     --clock-port clk_i --clock-period 50 --skip-repair --ideal-clock
+```
+
+Each script also stands alone, so a segment can start from someone else's result: `route.sh --def`
+routes any placed DEF, and `place.sh --def` places any floorplan.
+
+The IO pins are two engines: `ppl` chooses each pin's position on the die edge and `opendb`
+writes it into the database as a pin shape. Constraints come from `--sdc`, or are generated from
+`--clock-port` and `--clock-period` with input and output delays as a percentage of the period.
+
+### `--skip-repair` and `--ideal-clock`
+
+Two stages decline today's real netlists, and each says so with exit 3 and its reason:
+
+- **`rsz`** declines a design with tie cells (a cell driving a constant). Almost every synthesized
+  netlist has them. `--skip-repair` places the design without electrical repair.
+- **`cts`** finds every clock net and chooses its buffers, then stops before building the tree.
+  `--ideal-clock` carries on with the clock ideal.
+
+Without the flags the flow stops at the first such stage, which is the honest default. With them,
+the result line says which stages were skipped, so a routed design produced this way is never
+mistaken for one that had repair and a clock tree.
+
+### On a fabricated block
+
+`edge-sensor-demo.sh --through place|route` takes an edge-sensor block past the floorplan. Past the
+floorplan it reads the block's `<name>.nl.v`, the netlist an open flow hands to placement, and
+takes the clock, IO layers, routing layers and global-routing adjustment from the same
+`resolved.json` as the floorplan values.
+
+```sh
+./flows/edge-sensor-demo.sh --repo vyges-edge-sensor-soc --design rv_plic_lite \
+                            --through place --skip-repair --ideal-clock
+```
+
+`rv_plic_lite` places in about 13 seconds: 211 IO pins, 5,484 instances, every cell on a legal site
+and `check-placement` clean across every rule family it can run on the design.
+
+Routing it is not yet practical. Global routing completes in about a minute (3,167 nets), but with
+heavy overflow — initial-only placement packs the cells together — and detailed routing on that
+congested result had not finished after more than an hour, so `route.sh` has not yet been run end
+to end on this block. It is exercised on placed designs that come from a full placer.
+
 ### Logging
 
 Every engine logs through one path: `VYGES_LOG` (`trace|debug|info|warn|error`) sets the level and
