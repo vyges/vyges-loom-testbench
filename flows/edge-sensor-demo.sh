@@ -25,6 +25,7 @@
 #   --design NAME   any block under its signoff/          (default: rv_plic_lite)
 #   --out DIR       where to write                        (default: ./build)
 #   --through STAGE floorplan (default), place or route — how far to take the block
+#   --netlist FILE  the netlist to place, instead of the repo's post-PnR one (e.g. a synthesis output)
 #   ...any other option is passed through (--pdk, --pdk-root, --bin, --skip-repair, --ideal-clock, ...)
 #
 # --through place|route goes on through ./implement.sh. Past the floorplan the netlist is the
@@ -35,13 +36,14 @@
 #
 set -euo pipefail
 
-REPO=${VYGES_DESIGN_REPO:-$PWD} DESIGN=rv_plic_lite OUT=build THROUGH=floorplan PASS=()
+REPO=${VYGES_DESIGN_REPO:-$PWD} DESIGN=rv_plic_lite OUT=build THROUGH=floorplan PASS=() NETLIST_OVERRIDE=
 while [ $# -gt 0 ]; do
   case $1 in
     --repo)   REPO=$2; shift 2 ;;
     --design) DESIGN=$2; shift 2 ;;
     --out)    OUT=$2; shift 2 ;;
     --through) THROUGH=$2; shift 2 ;;
+    --netlist) NETLIST_OVERRIDE=$2; shift 2 ;;
     -h|--help) awk '!/^#/ && NR>1 {exit} /SPDX|©|licensed under the Apache|apache[.]org/ {next} NR>1 {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" | sed '/./,$!d'; exit 0 ;;
     *) PASS+=("$1"); shift ;;
   esac
@@ -57,6 +59,10 @@ NETLIST=$REPO/verilog/gl/$DESIGN.v
 # Placement wants the unpowered netlist: VPWR/VGND as ports are inout, and the supply nets are
 # made by global-connect anyway.
 [ "$THROUGH" != floorplan ] && [ -f "$REPO/verilog/gl/$DESIGN.nl.v" ] && NETLIST=$REPO/verilog/gl/$DESIGN.nl.v
+# A synthesized (pre-placement) netlist instead: the repo's are post-PnR, so they already carry the
+# taped-out clock tree and hold buffers — a flow that builds its own clock tree wants the netlist
+# from before them (e.g. LibreLane's Yosys.Synthesis output).
+[ -n "$NETLIST_OVERRIDE" ] && NETLIST=$NETLIST_OVERRIDE
 CONFIG=$REPO/signoff/$DESIGN/openlane-signoff/resolved.json
 for f in "$NETLIST" "$CONFIG"; do
   [ -f "$f" ] || {
