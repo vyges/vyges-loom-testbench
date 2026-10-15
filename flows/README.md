@@ -86,7 +86,7 @@ The floorplan is the first third of a block. These take it the rest of the way, 
 one numbered step per engine, each reading what the last one wrote.
 
 ```text
-place.sh      io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts
+place.sh      io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts  ->  rsz repair_clock_nets  ->  dpl
 route.sh      grt  ->  antenna repair  ->  dpl check  ->  drt  ->  write DEF  ->  ant
 implement.sh  floorplan.sh  ->  place.sh  ->  route.sh
 ```

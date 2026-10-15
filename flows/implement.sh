@@ -29,7 +29,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Which script owns which option, and whether it takes a value. Shared options go to all of them.
 PLACE_VAL=" --clock-port --clock-period --io-delay --sdc --density --io-hlayer --io-vlayer --signal-rc-layer \
---clock-rc-layer --slew-margin --cap-margin --clock-buffers --root-buffer --corner "
+--clock-rc-layer --slew-margin --cap-margin --clock-buffers --root-buffer --corner --clock-max-wire-length "
 PLACE_FLAG=" --skip-repair --ideal-clock "
 ROUTE_VAL=" --min-layer --max-layer --adjustment --diode-cell --antenna-iterations --antenna-margin "
 ROUTE_FLAG=" --no-congestion --no-antenna-repair "

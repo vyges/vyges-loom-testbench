@@ -45,7 +45,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEF= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC=
 IO_H=met3 IO_V=met2 SIG_RC=met2 CLK_RC=met5 SLEW=20 CAP=20
 CLKBUFS='sky130_fd_sc_hd__clkbuf_4 sky130_fd_sc_hd__clkbuf_8' ROOTBUF=sky130_fd_sc_hd__clkbuf_16
-SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY=
+SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY= CLK_MAX_WL=0
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -64,6 +64,7 @@ while [ $# -gt 0 ]; do
     --cap-margin)   CAP=$2; shift 2 ;;
     --clock-buffers) CLKBUFS=$2; shift 2 ;;
     --root-buffer)  ROOTBUF=$2; shift 2 ;;
+    --clock-max-wire-length) CLK_MAX_WL=$2; shift 2 ;;
     --skip-repair)  SKIP_REPAIR=1; shift ;;
     --ideal-clock)  IDEAL_CLOCK=1; shift ;;
     --pdk)          PDK=$2; shift 2 ;;
@@ -198,11 +199,35 @@ if [ "$rc" -ne 0 ]; then
   fi
 fi
 
+# 6b ── long wires on the clock nets ─────────────────────────────────────────────────────────
+# As the open flow's CTS step does after the tree: every clock propagated, placement parasitics,
+# then repair_clock_nets (CTS leaves a long wire from the clock port to the tree's root).
+CLOCKED=$OUT/p6.cts.odb
+if [ "$rc" -eq 0 ]; then
+  step "6b · rsz repair_clock_nets — long wires in the clock networks"
+  cat > "$OUT/p6b.rcn.job.json" <<EOF
+{"steps": [
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]},
+  {"cmd": "read_db", "args": ["$OUT/p6.cts.odb"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
+  {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
+  {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
+  {"cmd": "set_propagated_clock", "args": []},
+  {"cmd": "estimate_parasitics", "args": ["-placement"]},
+  {"cmd": "clock_buffers", "args": [$(printf '"%s",' $CLKBUFS | sed 's/,$//')]},
+  {"cmd": "repair_clock_nets", "args": ["-max_wire_length", "$CLK_MAX_WL"]}],
+ "write_db": "$OUT/p6b.rcn.odb"}
+EOF
+  rrc=0; runq "$RSZ" repair_design "$OUT/p6b.rcn.job.json" -o "$OUT/p6b.rcn.json" || rrc=$?
+  echo "  rsz: $(jget "$OUT/p6b.rcn.json" status) — $(jget "$OUT/p6b.rcn.json" inserted_buffers) buffers, $(jget "$OUT/p6b.rcn.json" nets_checked) clock drivers $(jget "$OUT/p6b.rcn.json" reason)"
+  [ "$rrc" -eq 0 ] || exit "$rrc"
+  CLOCKED=$OUT/p6b.rcn.odb
+fi
+
 # 7 ── the clock buffers onto legal sites ──────────────────────────────────────────────────────
 FINAL=$OUT/p4.legal.odb
 if [ "$rc" -eq 0 ]; then
   step "7 · dpl — the clock tree's buffers onto legal sites"
-  "$DPL" detailed-placement "$OUT/p6.cts.odb" --out-odb "$OUT/p7.legal.odb" \
+  "$DPL" detailed-placement "$CLOCKED" --out-odb "$OUT/p7.legal.odb" \
          > "$OUT/p7.dpl.json" 2> >(sed 's/^/  /' >&2)
   echo "  $(jget "$OUT/p7.dpl.json" status): $(jget "$OUT/p7.dpl.json" moved) of $(jget "$OUT/p7.dpl.json" cells) cells moved ($(jget "$OUT/p7.dpl.json" legalizer) legalizer)"
   step "8 · dpl check-placement — every rule family, with the clock tree"

@@ -109,7 +109,7 @@ SILICON=$REPO/def/$DESIGN.def
 # empty and to the quoted elements otherwise, so it is correct on both bash 3.2 and bash 5.
 if [ "$THROUGH" != floorplan ]; then
   # The place and route settings, from the same file.
-  IFS="|" read -r CLK PERIOD IOH IOV RTMIN RTMAX ADJ DENS DIODE ANT_ITERS ANT_MARGIN ANT_RUN < <("$PY" - "$CONFIG" <<'PY'
+  IFS="|" read -r CLK PERIOD IOH IOV RTMIN RTMAX ADJ DENS DIODE ANT_ITERS ANT_MARGIN ANT_RUN CLKWL < <("$PY" - "$CONFIG" <<'PY'
 import json, sys
 c = json.load(open(sys.argv[1]))
 print(c["CLOCK_PORT"] if isinstance(c["CLOCK_PORT"], str) else c["CLOCK_PORT"][0], c["CLOCK_PERIOD"],
@@ -121,10 +121,13 @@ print(c["CLOCK_PORT"] if isinstance(c["CLOCK_PORT"], str) else c["CLOCK_PORT"][0
       (c.get("DIODE_CELL") or "").split("/")[0],
       c.get("GRT_ANTENNA_REPAIR_ITERS", c.get("GRT_ANTENNA_ITERS", 3)),
       c.get("GRT_ANTENNA_REPAIR_MARGIN", c.get("GRT_ANTENNA_MARGIN", 10)),
-      "yes" if c.get("RUN_ANTENNA_REPAIR", True) and c.get("DIODE_CELL") else "no", sep="|")
+      "yes" if c.get("RUN_ANTENNA_REPAIR", True) and c.get("DIODE_CELL") else "no",
+      # CTS: repair_clock_nets -max_wire_length (0 = the length past which buffering pays).
+      c.get("CTS_CLK_MAX_WIRE_LENGTH", 0) or 0, sep="|")
 PY
 )
-  [ -n "$ANT_RUN" ] || { echo "error: could not read the place and route settings from $CONFIG" >&2; exit 2; }
+  [ -n "$CLKWL" ] || { echo "error: could not read the place and route settings from $CONFIG" >&2; exit 2; }
+  PASS+=(--clock-max-wire-length "$CLKWL")
   if [ "$ANT_RUN" = yes ]; then
     PASS+=(--diode-cell "$DIODE" --antenna-iterations "$ANT_ITERS" --antenna-margin "$ANT_MARGIN")
   else
