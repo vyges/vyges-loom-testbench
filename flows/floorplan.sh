@@ -170,6 +170,15 @@ DESIGN=$(basename "$NETLIST"); DESIGN=${DESIGN%.v}
 mkdir -p "$OUT"
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 step "$DESIGN — die [$DIE], core [$CORE], site $SITE"
+# Every setting the steps below use, so a run can be replayed (e.g. by another flow, to compare).
+"$PY" - "$OUT/0.floorplan.args.json" "$DIE" "$CORE" "$SITE" "$TAPCELL" "$ENDCAP" "$TAPDIST" "$POWER" "$GROUND" \
+  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" <<'PY'
+import json, sys
+k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground".split()
+a = dict(zip(k, sys.argv[2:]))
+a["pin_power"], a["pin_ground"] = a["pin_power"].split(), a["pin_ground"].split()
+json.dump(a, open(sys.argv[1], "w"), indent=1)
+PY
 echo "pdk:     $PDK · $LIB · $(dirname "$(dirname "$TLEF")")"
 echo "engines: $(dirname "$IFP")"
 

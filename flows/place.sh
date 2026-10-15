@@ -105,27 +105,14 @@ EOF
 fi
 
 # 1 ── the IO pins ────────────────────────────────────────────────────────────────────────────
-# ppl chooses where each pin goes; opendb writes those positions into the database as pin shapes,
-# one track wide and a micron deep, on the edge ppl chose.
+# ppl chooses where each pin goes and writes each port's pin into the database: one rectangle on
+# its layer, sized from the layer's minimum width and area as the reference sizes it, PLACED.
 step "1 · ppl — IO pins on the die boundary"
 def_to_odb "$DEF" "$OUT/p1.floorplan.odb"
-runq "$PPL" place-pins "$OUT/p1.floorplan.odb" --hor-layers "$IO_H" --ver-layers "$IO_V" -o "$OUT/p1.ppl.json"
-"$PY" - "$OUT/p1.ppl.json" "$TLEF" "$OUT/p1.io.json" <<'PY'
-import json, re, sys
-r = json.load(open(sys.argv[1])); lef = open(sys.argv[2]).read(); dbu = r["dbu_per_micron"]
-width = {m.group(1): float(m.group(2))
-         for m in re.finditer(r"LAYER (\S+)\s*\n(?:(?!END).*\n)*?\s*WIDTH ([\d.]+)", lef)}
-(x0, y0), (x1, y1) = r["die_area"][0:2], r["die_area"][2:4]
-pins = []
-for p in r["placements"]:
-    w = int(round(width[p["layer"]] * dbu / 2)); d = dbu; x, y = p["x"], p["y"]
-    box = {"left": (x0, y - w, x0 + d, y + w), "right": (x1 - d, y - w, x1, y + w),
-           "bottom": (x - w, y0, x + w, y0 + d)}.get(p["edge"], (x - w, y1 - d, x + w, y1))
-    pins.append(dict(port=p["pin"], layer=p["layer"], llx=box[0], lly=box[1], urx=box[2], ury=box[3]))
-json.dump({"CUSTOM_IO_PLACEMENT": pins}, open(sys.argv[3], "w"))
-print(f"  {len(pins)} pins, {r['pins_placed']} of {r['pins_total']} placed by ppl")
-PY
-runq "$ODB" custom-io-placement --input "$OUT/p1.floorplan.odb" --output "$OUT/p1.io.odb" --config "$OUT/p1.io.json"
+printf '{"hor_layers": "%s", "ver_layers": "%s"}\n' "$IO_H" "$IO_V" > "$OUT/p1.ppl.args.json"
+runq "$PPL" place-pins "$OUT/p1.floorplan.odb" --hor-layers "$IO_H" --ver-layers "$IO_V" \
+     --out-odb "$OUT/p1.io.odb" -o "$OUT/p1.ppl.json"
+echo "  $(jget "$OUT/p1.ppl.json" pins_placed) of $(jget "$OUT/p1.ppl.json" pins_total) pins placed by ppl"
 
 # 2 ── global placement ──────────────────────────────────────────────────────────────────────
 GPL_ARGS=
@@ -243,7 +230,7 @@ runq "$ODB" write-def --input "$OUT/placed.odb" --output "$OUT/placed.def"
 step "result — $OUT/placed.odb (and placed.def)"
 printf '  %-14s %s\n' \
   instances  "$(jget "$OUT/p2.gpl.json" insts)" \
-  "io pins"  "$("$PY" -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["CUSTOM_IO_PLACEMENT"]))' "$OUT/p1.io.json")" \
+  "io pins"  "$(jget "$OUT/p1.ppl.json" pins_placed)" \
   repair     "$([ "$SKIP_REPAIR" = 1 ] && echo skipped || jget "$OUT/p3.rsz.json" status)" \
   legal      "$(jget "$OUT/p5.check.json" status)" \
   "clock tree" "$([ "$rc" -eq 0 ] && jget "$OUT/p6.cts.json" status || echo 'ideal (not built)')"
