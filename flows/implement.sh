@@ -31,8 +31,8 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PLACE_VAL=" --clock-port --clock-period --io-delay --sdc --density --io-hlayer --io-vlayer --signal-rc-layer \
 --clock-rc-layer --slew-margin --cap-margin --clock-buffers --root-buffer --corner "
 PLACE_FLAG=" --skip-repair --ideal-clock "
-ROUTE_VAL=" --min-layer --max-layer --adjustment "
-ROUTE_FLAG=" --no-congestion "
+ROUTE_VAL=" --min-layer --max-layer --adjustment --diode-cell --antenna-iterations --antenna-margin "
+ROUTE_FLAG=" --no-congestion --no-antenna-repair "
 SHARED_VAL=" --pdk --library --pdk-root --bin "
 
 THROUGH=route OUT=build FP=() PL=() RT=()

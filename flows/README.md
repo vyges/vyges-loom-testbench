@@ -87,7 +87,7 @@ one numbered step per engine, each reading what the last one wrote.
 
 ```text
 place.sh      io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts
-route.sh      grt  ->  drt  ->  write DEF  ->  ant
+route.sh      grt  ->  antenna repair  ->  dpl check  ->  drt  ->  write DEF  ->  ant
 implement.sh  floorplan.sh  ->  place.sh  ->  route.sh
 ```
 
@@ -98,6 +98,13 @@ implement.sh  floorplan.sh  ->  place.sh  ->  route.sh
 
 Each script also stands alone, so a segment can start from someone else's result: `route.sh --def`
 routes any placed DEF, and `place.sh --def` places any floorplan.
+
+Antenna repair runs inside the global router, on its routes: jumpers first, then a diode beside
+each gate still in violation, the diodes legalized onto the rows and the nets they touched
+rerouted, for up to `--antenna-iterations` passes (default 3, margin `--antenna-margin` 10 %).
+`--diode-cell` names the diode; without it the library's first antenna cell is used.
+`--no-antenna-repair` routes without it. `edge-sensor-demo.sh` reads all three from the block's
+own configuration.
 
 The IO pins are two engines: `ppl` chooses each pin's position on the die edge and `opendb`
 writes it into the database as a pin shape. Constraints come from `--sdc`, or are generated from
