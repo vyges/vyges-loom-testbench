@@ -30,6 +30,8 @@
 #   --slew-margin PCT / --cap-margin PCT   repair margins          (default 20 / 20)
 #   --clock-buffers 'A B' clock buffer masters for cts            (default sky130 clkbuf_4 and _8)
 #   --root-buffer M       cts root buffer                         (default sky130 clkbuf_16)
+#   --dont-use FILE       cells rsz must not insert: names or globs, whitespace-separated, '#' comments
+#                         (default: the PDK store's `dont_use` for the library, if it has one)
 #   --skip-repair         do not run rsz repair_design
 #   --ideal-clock         carry on when cts does not build a clock tree (the clock stays ideal)
 #   --pdk / --library / --corner / --pdk-root    as in ./floorplan.sh (corner default tt_025C_1v80)
@@ -45,7 +47,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEF= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC=
 IO_H=met3 IO_V=met2 SIG_RC=met2 CLK_RC=met5 SLEW=20 CAP=20
 CLKBUFS='sky130_fd_sc_hd__clkbuf_4 sky130_fd_sc_hd__clkbuf_8' ROOTBUF=sky130_fd_sc_hd__clkbuf_16
-SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY= CLK_MAX_WL=0
+SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY= CLK_MAX_WL=0 DONT_USE_FILE=
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -65,6 +67,7 @@ while [ $# -gt 0 ]; do
     --clock-buffers) CLKBUFS=$2; shift 2 ;;
     --root-buffer)  ROOTBUF=$2; shift 2 ;;
     --clock-max-wire-length) CLK_MAX_WL=$2; shift 2 ;;
+    --dont-use)     DONT_USE_FILE=$2; shift 2 ;;
     --skip-repair)  SKIP_REPAIR=1; shift ;;
     --ideal-clock)  IDEAL_CLOCK=1; shift ;;
     --pdk)          PDK=$2; shift 2 ;;
@@ -85,6 +88,19 @@ if [ -z "$SDC" ] && { [ -z "$CLOCK_PORT" ] || [ -z "$CLOCK_PERIOD" ]; }; then
 fi
 ODB=$(eng opendb); PPL=$(eng ppl); GPL=$(eng gpl); RSZ=$(eng rsz); DPL=$(eng dpl); CTS=$(eng cts)
 pdk_resolve
+# The cells repair must not insert. A sky130 probe cell, for one, is a buffer whose output pin is on
+# met5: inserted, it leaves a pin above the routing layers that detailed routing cannot reach.
+if [ -z "$DONT_USE_FILE" ]; then
+  if [ -n "${BIN:-}" ]; then STORE=$BIN/vyges-pdk-store; else STORE=$(command -v vyges-pdk-store 2>/dev/null || true); fi
+  [ -x "$STORE" ] && DONT_USE_FILE=$("$STORE" resolve "$PDK" dont_use --library "$LIB" 2>/dev/null | head -1) || true
+fi
+DONT_USE=
+if [ -n "$DONT_USE_FILE" ]; then
+  [ -f "$DONT_USE_FILE" ] || { echo "error: --dont-use $DONT_USE_FILE: no such file." >&2; exit 2; }
+  DONT_USE=$(sed 's/#.*//' "$DONT_USE_FILE" | tr -s ' \t\n' ' ' | sed 's/^ //; s/ $//')
+fi
+# The step that carries it into an rsz job, after its liberty (nothing when there is no list).
+dont_use_step() { [ -n "$DONT_USE" ] && printf '{"cmd": "set_dont_use", "args": ["%s"]},' "$DONT_USE"; return 0; }
 mkdir -p "$OUT"
 DESIGN=$(awk '/^DESIGN /{print $2; exit}' "$DEF")
 step "$DESIGN — placement, from $DEF"
@@ -137,7 +153,7 @@ else
 {"steps": [
   {"cmd": "read_lef", "args": ["$TLEF"]}, {"cmd": "read_lef", "args": ["$CLEF"]},
   {"cmd": "read_def", "args": ["$PLACED"]},
-  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(dont_use_step) {"cmd": "read_sdc", "args": ["$SDC"]},
   {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
   {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
   {"cmd": "estimate_parasitics", "args": ["-placement"]},
@@ -194,7 +210,7 @@ if [ "$rc" -eq 0 ]; then
   step "6b · rsz repair_clock_nets — long wires in the clock networks"
   cat > "$OUT/p6b.rcn.job.json" <<EOF
 {"steps": [
-  {"cmd": "read_liberty", "args": ["$LIBERTY"]},
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(dont_use_step)
   {"cmd": "read_db", "args": ["$OUT/p6.cts.odb"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
   {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
   {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
