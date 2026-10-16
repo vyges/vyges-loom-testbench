@@ -55,6 +55,51 @@ pdk_resolve() {
   done
 }
 
+# The cells no engine may insert (`dont_use`): DONT_USE_FILE if given (--dont-use), else the PDK
+# store's list for the library; DONT_USE = its names or globs, whitespace-separated, '#' comments
+# dropped. A sky130 probe cell, for one, is a buffer whose output pin is on met5: inserted, it
+# leaves a pin above the routing layers that detailed routing cannot reach.
+dont_use_resolve() {
+  local store
+  if [ -z "${DONT_USE_FILE:-}" ]; then
+    if [ -n "${BIN:-}" ]; then store=$BIN/vyges-pdk-store; else store=$(command -v vyges-pdk-store 2>/dev/null || true); fi
+    [ -x "${store:-}" ] && DONT_USE_FILE=$("$store" resolve "$PDK" dont_use --library "$LIB" 2>/dev/null | head -1) || true
+  fi
+  DONT_USE=
+  if [ -n "${DONT_USE_FILE:-}" ]; then
+    [ -f "$DONT_USE_FILE" ] || { echo "error: --dont-use $DONT_USE_FILE: no such file." >&2; exit 2; }
+    DONT_USE=$(sed 's/#.*//' "$DONT_USE_FILE" | tr -s ' \t\n' ' ' | sed 's/^ //; s/ $//')
+  fi
+}
+
+# The step that carries the list into an engine's job, after its liberty (nothing without a list):
+# every engine that picks a cell reads it, as `set_dont_use` marks the cell for every tool.
+dont_use_step() { [ -n "${DONT_USE:-}" ] && printf '{"cmd": "set_dont_use", "args": ["%s"]},' "$DONT_USE"; return 0; }
+
+# The design's instances whose master is on the list, from its DEF COMPONENTS: printed, and the
+# count returned in DONT_USE_FOUND. An engine that does not pick cells still answers for them here.
+dont_use_check() {
+  DONT_USE_FOUND=0
+  [ -n "${DONT_USE:-}" ] || return 0
+  local out
+  out=$("$PY" - "$1" "$DONT_USE" <<'PYEOF'
+import fnmatch, re, sys
+pats = sys.argv[2].split()
+hits, inside = [], False
+for line in open(sys.argv[1]):
+    if line.startswith("COMPONENTS"): inside = True; continue
+    if line.startswith("END COMPONENTS"): break
+    m = inside and re.match(r"\s*-\s+(\S+)\s+(\S+)", line)
+    if m and any(fnmatch.fnmatchcase(m.group(2), p) for p in pats):
+        hits.append(f"{m.group(1)} ({m.group(2)})")
+print(len(hits)); print(" ".join(hits[:10]) + (" …" if len(hits) > 10 else ""))
+PYEOF
+)
+  DONT_USE_FOUND=$(echo "$out" | head -1)
+  if [ "$DONT_USE_FOUND" -gt 0 ]; then echo "  dont_use: $DONT_USE_FOUND instance(s) of excluded cells: $(echo "$out" | sed -n 2p)"
+  else echo "  dont_use: no excluded cell in the design"; fi
+}
+
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 # Run one engine, indent its log, and keep its exit status (a pipe would otherwise report sed's).

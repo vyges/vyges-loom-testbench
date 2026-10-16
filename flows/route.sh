@@ -31,6 +31,10 @@
 #   --antenna-iterations N  repair passes at most          (default 3)
 #   --antenna-margin PCT  repair to this margin under each antenna limit (default 10)
 #   --no-antenna-repair   route without repairing; the ant check still reports
+#   --threads N           detailed-routing worker threads (default: every CPU); the routes are the
+#                         same at any count
+#   --dont-use FILE       cells the routed design must not contain (default: the PDK store's
+#                         `dont_use` for the library); any found is reported and exits 1
 #   --pdk / --library / --pdk-root    as in ./floorplan.sh
 #   --out DIR             where to write (default ./build)
 #   --bin DIR             engine binaries, instead of PATH
@@ -42,7 +46,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
-ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10
+ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS=
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -57,6 +61,8 @@ while [ $# -gt 0 ]; do
     --antenna-iterations) ANT_ITERS=$2; shift 2 ;;
     --antenna-margin) ANT_MARGIN=$2; shift 2 ;;
     --no-antenna-repair) ANT_REPAIR=false; shift ;;
+    --dont-use)   DONT_USE_FILE=$2; shift 2 ;;
+    --threads)    THREADS=$2; shift 2 ;;
     --pdk)        PDK=$2; shift 2 ;;
     --library)    LIB=$2; shift 2 ;;
     --pdk-root)   export PDK_ROOT=$2; shift 2 ;;
@@ -117,7 +123,11 @@ fi
 
 # 2 ── detailed routing ──────────────────────────────────────────────────────────────────────
 step "2 · drt — wires and vias, repaired until no design-rule marker stands"
-rc=0; runq "$DRT" detailed_route --db "$OUT/r1.grt.odb" --out "$OUT/routed.odb" -o "$OUT/r2.drt.json" || rc=$?
+# Each search-and-repair batch's workers in parallel, written back in batch order: the same routes
+# at any thread count.
+THREADS=${THREADS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)}
+echo "  drt threads: $THREADS"
+rc=0; VYGES_DRT_THREADS=$THREADS runq "$DRT" detailed_route --db "$OUT/r1.grt.odb" --out "$OUT/routed.odb" -o "$OUT/r2.drt.json" || rc=$?
 echo "  drt: $(jget "$OUT/r2.drt.json" status) $(jget "$OUT/r2.drt.json" reason)"
 # markers (1) is a finding: the design is routed and written, so the rest still runs.
 [ "$rc" -le 1 ] || exit "$rc"
@@ -126,6 +136,8 @@ DRT_RC=$rc
 # 3 ── the routed design as DEF ─────────────────────────────────────────────────────────────
 step "3 · write the routed design"
 runq "$ODB" write-def --input "$OUT/routed.odb" --output "$OUT/routed.def"
+dont_use_resolve
+dont_use_check "$OUT/routed.def"
 
 # 4 ── antenna ───────────────────────────────────────────────────────────────────────────────
 step "4 · ant — antenna ratios on the routed metal"
@@ -136,5 +148,6 @@ echo "  ant: $(jget "$OUT/r4.ant.json" status)"
 step "result — $OUT/routed.odb (and routed.def)"
 printf '  %-10s %s\n' \
   routing "$(jget "$OUT/r2.drt.json" status)" \
-  antenna "$(jget "$OUT/r4.ant.json" status)"
-[ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] || exit 1
+  antenna "$(jget "$OUT/r4.ant.json" status)" \
+  dont_use "$([ "$DONT_USE_FOUND" -eq 0 ] && echo clean || echo "$DONT_USE_FOUND excluded")"
+[ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] && [ "$DONT_USE_FOUND" -eq 0 ] || exit 1

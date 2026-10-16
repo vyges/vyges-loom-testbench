@@ -29,11 +29,13 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Which script owns which option, and whether it takes a value. Shared options go to all of them.
 PLACE_VAL=" --clock-port --clock-period --io-delay --sdc --density --io-hlayer --io-vlayer --signal-rc-layer \
---clock-rc-layer --slew-margin --cap-margin --clock-buffers --root-buffer --corner --clock-max-wire-length --dont-use "
+--clock-rc-layer --slew-margin --cap-margin --clock-buffers --root-buffer --corner --clock-max-wire-length "
 PLACE_FLAG=" --skip-repair --ideal-clock "
-ROUTE_VAL=" --min-layer --max-layer --adjustment --diode-cell --antenna-iterations --antenna-margin "
+ROUTE_VAL=" --min-layer --max-layer --adjustment --diode-cell --antenna-iterations --antenna-margin --threads "
 ROUTE_FLAG=" --no-congestion --no-antenna-repair "
 SHARED_VAL=" --pdk --library --pdk-root --bin "
+# Place and route both take these (floorplan inserts no cells).
+PR_VAL=" --dont-use "
 
 THROUGH=route OUT=build FP=() PL=() RT=()
 while [ $# -gt 0 ]; do
@@ -44,6 +46,7 @@ while [ $# -gt 0 ]; do
       awk '!/^#/ && NR>1 {exit} /SPDX|©|licensed under the Apache|apache[.]org/ {next} NR>1 {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" | sed '/./,$!d'; exit 0 ;;
     *)
       if   [[ $SHARED_VAL == *" $1 "* ]]; then FP+=("$1" "$2"); PL+=("$1" "$2"); RT+=("$1" "$2"); shift 2
+      elif [[ $PR_VAL     == *" $1 "* ]]; then PL+=("$1" "$2"); RT+=("$1" "$2"); shift 2
       elif [[ $PLACE_VAL  == *" $1 "* ]]; then PL+=("$1" "$2"); shift 2
       elif [[ $PLACE_FLAG == *" $1 "* ]]; then PL+=("$1"); shift
       elif [[ $ROUTE_VAL  == *" $1 "* ]]; then RT+=("$1" "$2"); shift 2

@@ -30,7 +30,7 @@
 #   --slew-margin PCT / --cap-margin PCT   repair margins          (default 20 / 20)
 #   --clock-buffers 'A B' clock buffer masters for cts            (default sky130 clkbuf_4 and _8)
 #   --root-buffer M       cts root buffer                         (default sky130 clkbuf_16)
-#   --dont-use FILE       cells rsz must not insert: names or globs, whitespace-separated, '#' comments
+#   --dont-use FILE       cells no engine may insert (rsz, cts): names or globs, whitespace-separated, '#' comments
 #                         (default: the PDK store's `dont_use` for the library, if it has one)
 #   --skip-repair         do not run rsz repair_design
 #   --ideal-clock         carry on when cts does not build a clock tree (the clock stays ideal)
@@ -88,19 +88,7 @@ if [ -z "$SDC" ] && { [ -z "$CLOCK_PORT" ] || [ -z "$CLOCK_PERIOD" ]; }; then
 fi
 ODB=$(eng opendb); PPL=$(eng ppl); GPL=$(eng gpl); RSZ=$(eng rsz); DPL=$(eng dpl); CTS=$(eng cts)
 pdk_resolve
-# The cells repair must not insert. A sky130 probe cell, for one, is a buffer whose output pin is on
-# met5: inserted, it leaves a pin above the routing layers that detailed routing cannot reach.
-if [ -z "$DONT_USE_FILE" ]; then
-  if [ -n "${BIN:-}" ]; then STORE=$BIN/vyges-pdk-store; else STORE=$(command -v vyges-pdk-store 2>/dev/null || true); fi
-  [ -x "$STORE" ] && DONT_USE_FILE=$("$STORE" resolve "$PDK" dont_use --library "$LIB" 2>/dev/null | head -1) || true
-fi
-DONT_USE=
-if [ -n "$DONT_USE_FILE" ]; then
-  [ -f "$DONT_USE_FILE" ] || { echo "error: --dont-use $DONT_USE_FILE: no such file." >&2; exit 2; }
-  DONT_USE=$(sed 's/#.*//' "$DONT_USE_FILE" | tr -s ' \t\n' ' ' | sed 's/^ //; s/ $//')
-fi
-# The step that carries it into an rsz job, after its liberty (nothing when there is no list).
-dont_use_step() { [ -n "$DONT_USE" ] && printf '{"cmd": "set_dont_use", "args": ["%s"]},' "$DONT_USE"; return 0; }
+dont_use_resolve
 mkdir -p "$OUT"
 DESIGN=$(awk '/^DESIGN /{print $2; exit}' "$DEF")
 step "$DESIGN — placement, from $DEF"
@@ -185,7 +173,7 @@ echo "  $(jget "$OUT/p5.check.json" status): $(jget "$OUT/p5.check.json" violati
 step "6 · cts — clock tree synthesis"
 cat > "$OUT/p6.cts.job.json" <<EOF
 {"steps": [{"cmd": "read_db", "args": ["$OUT/p4.legal.odb"]},
-           {"cmd": "read_liberty", "args": ["$LIBERTY"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
+           {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(dont_use_step) {"cmd": "read_sdc", "args": ["$SDC"]},
            {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
            {"cmd": "clock_tree_synthesis", "args": ["-root_buf", "$ROOTBUF", "-buf_list", "$CLKBUFS"]}],
  "write_db": "$OUT/p6.cts.odb"}
@@ -243,6 +231,7 @@ fi
 # ── what came out ───────────────────────────────────────────────────────────────────────────
 cp "$FINAL" "$OUT/placed.odb"
 runq "$ODB" write-def --input "$OUT/placed.odb" --output "$OUT/placed.def"
+dont_use_check "$OUT/placed.def"
 step "result — $OUT/placed.odb (and placed.def)"
 printf '  %-14s %s\n' \
   instances  "$(jget "$OUT/p2.gpl.json" insts)" \
