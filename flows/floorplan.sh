@@ -51,6 +51,9 @@
 #                         N S W E FN FS FW FE), each fixed (FIRM) where it is put
 #   --macro-halo 'X Y'    keep-out around each macro, in microns, where the rows are cut
 #                         (default: the tap engine's)
+#   --macro-grid 'CELLS:H:V'  a power grid on each macro whose cell matches the regex CELLS: halo H
+#                         V microns, starting with power, the vertical and horizontal strap layers
+#                         connected (the macro's own supply pins carry it)
 #   --strip-physical      drop fillers, decaps, taps and diodes from a POST-PnR netlist first
 #   --check-def FILE      compare the rows and tracks produced against a reference DEF; exit 1 if they differ
 #   --out DIR             where to write (default ./build)
@@ -72,7 +75,7 @@ TAPCELL=sky130_fd_sc_hd__tapvpwrvgnd_1 ENDCAP=sky130_fd_sc_hd__decap_3 TAPDIST=1
 RAIL=met1:0.48 VSTRIPE=met4:1.6:153.6:16.32 HSTRIPE=met5:1.6:153.18:16.65
 STRIP=0 CHECKDEF= OUT=build BIN=${VYGES_BIN:-}
 PIN_POWER=() PIN_GROUND=()
-MACRO_LEFS=() MACRO_PLACEMENT= MACRO_HALO=
+MACRO_LEFS=() MACRO_PLACEMENT= MACRO_HALO= MACRO_GRID=
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -97,6 +100,7 @@ while [ $# -gt 0 ]; do
     --macro-lef)   MACRO_LEFS+=("$2"); shift 2 ;;
     --macro-placement) MACRO_PLACEMENT=$2; shift 2 ;;
     --macro-halo)  MACRO_HALO=$2; shift 2 ;;
+    --macro-grid)  MACRO_GRID=$2; shift 2 ;;
     --strip-physical) STRIP=1; shift ;;
     --check-def)   CHECKDEF=$2; shift 2 ;;
     --out)         OUT=$2; shift 2 ;;
@@ -181,9 +185,9 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 step "$DESIGN — die [$DIE], core [$CORE], site $SITE"
 # Every setting the steps below use, so a run can be replayed (e.g. by another flow, to compare).
 "$PY" - "$OUT/0.floorplan.args.json" "$DIE" "$CORE" "$SITE" "$TAPCELL" "$ENDCAP" "$TAPDIST" "$POWER" "$GROUND" \
-  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" "$MACRO_PLACEMENT" "$MACRO_HALO" <<'PY'
+  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" "$MACRO_PLACEMENT" "$MACRO_HALO" "$MACRO_GRID" <<'PY'
 import json, sys
-k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground macro_placement macro_halo".split()
+k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground macro_placement macro_halo macro_grid".split()
 a = dict(zip(k, sys.argv[2:]))
 a["pin_power"], a["pin_ground"] = a["pin_power"].split(), a["pin_ground"].split()
 a["macro_halo"] = a["macro_halo"].split()
@@ -273,12 +277,17 @@ step "6 · pdn generate — rails, straps and the vias between them"
 IFS=: read -r RL RW <<<"$RAIL"
 IFS=: read -r VL VW VP VO <<<"$VSTRIPE"
 IFS=: read -r HL HW HP HO <<<"$HSTRIPE"
+MGRID=()
+if [ -n "$MACRO_GRID" ]; then
+  IFS=: read -r MCELLS MH MV <<<"$MACRO_GRID"
+  MGRID=(--grid "macro:macro:c=$MCELLS:$MH,$MV" --starts-with power --connect "$VL,$HL::::::::")
+fi
 "$PDN" generate "$OUT/5.connected.odb" --out-def "$OUT/6.floorplan.def" \
        --power "$POWER" --ground "$GROUND" --voltage-domains CORE --grid stdcell:core \
        --followpins "$RL:core:$RW" \
        --stripe "$VL:$VW:$VP:$VO:core:0:::::" \
        --stripe "$HL:$HW:$HP:$HO:core:0:::::" \
-       --connect "$RL,$VL::::::::" --connect "$VL,$HL::::::::" --trim 1 \
+       --connect "$RL,$VL::::::::" --connect "$VL,$HL::::::::" "${MGRID[@]}" --trim 1 \
        > "$OUT/6.pdn.json" 2> "$OUT/6.pdn.log"
 sed 's/^/  /' "$OUT/6.pdn.log" "$OUT/6.pdn.json"
 
