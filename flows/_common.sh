@@ -105,8 +105,14 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 # Run one engine, indent its log, and keep its exit status (a pipe would otherwise report sed's).
 runq() { "$@" 2>&1 | sed 's/^/  /'; return "${PIPESTATUS[0]}"; }
 
+# Hard macros (--macro-lef / --macro-lib): their LEFs after the cell library's, their libraries
+# after the cell library in every timing job.
+macro_lef_args() { local f; for f in "${MACRO_LEFS[@]+"${MACRO_LEFS[@]}"}"; do printf '%s\n' --lef "$f"; done; }
+macro_lef_steps() { local f; for f in "${MACRO_LEFS[@]+"${MACRO_LEFS[@]}"}"; do printf '{"cmd": "read_lef", "args": ["%s"]}, ' "$f"; done; }
+macro_lib_steps() { local f; for f in "${MACRO_LIBS[@]+"${MACRO_LIBS[@]}"}"; do printf '{"cmd": "read_liberty", "args": ["%s"]}, ' "$f"; done; }
+
 # A database from LEF + DEF. The FIRST --lef creates the technology, so the tech LEF goes first.
-def_to_odb() { runq "$ODB" import --lef "$TLEF" --lef "$CLEF" --def "$1" --output "$2"; }
+def_to_odb() { local m; mapfile -t m < <(macro_lef_args); runq "$ODB" import --lef "$TLEF" --lef "$CLEF" "${m[@]+"${m[@]}"}" --def "$1" --output "$2"; }
 
 # Read one top-level field of a JSON report.
 jget() { "$PY" -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if v is None else v)' "$1" "$2"; }

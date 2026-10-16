@@ -30,6 +30,8 @@
 #   --slew-margin PCT / --cap-margin PCT   repair margins          (default 20 / 20)
 #   --clock-buffers 'A B' clock buffer masters for cts            (default sky130 clkbuf_4 and _8)
 #   --root-buffer M       cts root buffer                         (default sky130 clkbuf_16)
+#   --macro-lef FILE      a hard macro's LEF (repeatable), to read the floorplan DEF
+#   --macro-lib FILE      a hard macro's Liberty (repeatable), for every timing step
 #   --dont-use FILE       cells no engine may insert (rsz, cts): names or globs, whitespace-separated, '#' comments
 #                         (default: the PDK store's `dont_use` for the library, if it has one)
 #   --skip-repair         do not run rsz repair_design
@@ -48,6 +50,7 @@ DEF= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC=
 IO_H=met3 IO_V=met2 SIG_RC=met2 CLK_RC=met5 SLEW=20 CAP=20
 CLKBUFS='sky130_fd_sc_hd__clkbuf_4 sky130_fd_sc_hd__clkbuf_8' ROOTBUF=sky130_fd_sc_hd__clkbuf_16
 SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY= CLK_MAX_WL=0 DONT_USE_FILE=
+MACRO_LEFS=() MACRO_LIBS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -68,6 +71,8 @@ while [ $# -gt 0 ]; do
     --root-buffer)  ROOTBUF=$2; shift 2 ;;
     --clock-max-wire-length) CLK_MAX_WL=$2; shift 2 ;;
     --dont-use)     DONT_USE_FILE=$2; shift 2 ;;
+    --macro-lef)    MACRO_LEFS+=("$2"); shift 2 ;;
+    --macro-lib)    MACRO_LIBS+=("$2"); shift 2 ;;
     --skip-repair)  SKIP_REPAIR=1; shift ;;
     --ideal-clock)  IDEAL_CLOCK=1; shift ;;
     --pdk)          PDK=$2; shift 2 ;;
@@ -139,9 +144,9 @@ else
   step "3 · rsz repair_design — slew, capacitance, fanout and wire length"
   cat > "$OUT/p3.rsz.job.json" <<EOF
 {"steps": [
-  {"cmd": "read_lef", "args": ["$TLEF"]}, {"cmd": "read_lef", "args": ["$CLEF"]},
+  {"cmd": "read_lef", "args": ["$TLEF"]}, {"cmd": "read_lef", "args": ["$CLEF"]}, $(macro_lef_steps)
   {"cmd": "read_def", "args": ["$PLACED"]},
-  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(dont_use_step) {"cmd": "read_sdc", "args": ["$SDC"]},
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(macro_lib_steps)$(dont_use_step) {"cmd": "read_sdc", "args": ["$SDC"]},
   {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
   {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
   {"cmd": "estimate_parasitics", "args": ["-placement"]},
@@ -173,7 +178,7 @@ echo "  $(jget "$OUT/p5.check.json" status): $(jget "$OUT/p5.check.json" violati
 step "6 · cts — clock tree synthesis"
 cat > "$OUT/p6.cts.job.json" <<EOF
 {"steps": [{"cmd": "read_db", "args": ["$OUT/p4.legal.odb"]},
-           {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(dont_use_step) {"cmd": "read_sdc", "args": ["$SDC"]},
+           {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(macro_lib_steps)$(dont_use_step) {"cmd": "read_sdc", "args": ["$SDC"]},
            {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
            {"cmd": "clock_tree_synthesis", "args": ["-root_buf", "$ROOTBUF", "-buf_list", "$CLKBUFS"]}],
  "write_db": "$OUT/p6.cts.odb"}
@@ -198,7 +203,7 @@ if [ "$rc" -eq 0 ]; then
   step "6b · rsz repair_clock_nets — long wires in the clock networks"
   cat > "$OUT/p6b.rcn.job.json" <<EOF
 {"steps": [
-  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(dont_use_step)
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(macro_lib_steps)$(dont_use_step)
   {"cmd": "read_db", "args": ["$OUT/p6.cts.odb"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
   {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
   {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},

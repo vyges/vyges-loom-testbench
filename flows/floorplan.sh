@@ -8,7 +8,7 @@
 #
 # Build a floorplan for any gate-level design with the Vyges Loom engines.
 #
-#     import  ->  ifp  ->  make-tracks  ->  tap  ->  global-connect  ->  pdn
+#     import  ->  ifp  ->  make-tracks  ->  [macro placement]  ->  tap  ->  global-connect  ->  pdn
 #
 # Six steps, four static binaries, no OpenROAD. Nothing here starts a container, sources a Tcl
 # script, or installs anything from PyPI. Run it on your own block as often as you like — it is
@@ -46,6 +46,11 @@
 #   --rail   L:W          followpin rail, layer and width       (default met1:0.48)
 #   --vstripe L:W:P:O     vertical strap: layer, width, pitch, offset   (default met4:1.6:153.6:16.32)
 #   --hstripe L:W:P:O     horizontal strap, same shape                  (default met5:1.6:153.18:16.65)
+#   --macro-lef FILE      a hard macro's LEF, read after the cell library (repeatable)
+#   --macro-placement FILE   place the macros first: `instance x y orientation` per line (microns;
+#                         N S W E FN FS FW FE), each fixed (FIRM) where it is put
+#   --macro-halo 'X Y'    keep-out around each macro, in microns, where the rows are cut
+#                         (default: the tap engine's)
 #   --strip-physical      drop fillers, decaps, taps and diodes from a POST-PnR netlist first
 #   --check-def FILE      compare the rows and tracks produced against a reference DEF; exit 1 if they differ
 #   --out DIR             where to write (default ./build)
@@ -67,6 +72,7 @@ TAPCELL=sky130_fd_sc_hd__tapvpwrvgnd_1 ENDCAP=sky130_fd_sc_hd__decap_3 TAPDIST=1
 RAIL=met1:0.48 VSTRIPE=met4:1.6:153.6:16.32 HSTRIPE=met5:1.6:153.18:16.65
 STRIP=0 CHECKDEF= OUT=build BIN=${VYGES_BIN:-}
 PIN_POWER=() PIN_GROUND=()
+MACRO_LEFS=() MACRO_PLACEMENT= MACRO_HALO=
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -88,6 +94,9 @@ while [ $# -gt 0 ]; do
     --rail)        RAIL=$2; shift 2 ;;
     --vstripe)     VSTRIPE=$2; shift 2 ;;
     --hstripe)     HSTRIPE=$2; shift 2 ;;
+    --macro-lef)   MACRO_LEFS+=("$2"); shift 2 ;;
+    --macro-placement) MACRO_PLACEMENT=$2; shift 2 ;;
+    --macro-halo)  MACRO_HALO=$2; shift 2 ;;
     --strip-physical) STRIP=1; shift ;;
     --check-def)   CHECKDEF=$2; shift 2 ;;
     --out)         OUT=$2; shift 2 ;;
@@ -172,11 +181,12 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 step "$DESIGN — die [$DIE], core [$CORE], site $SITE"
 # Every setting the steps below use, so a run can be replayed (e.g. by another flow, to compare).
 "$PY" - "$OUT/0.floorplan.args.json" "$DIE" "$CORE" "$SITE" "$TAPCELL" "$ENDCAP" "$TAPDIST" "$POWER" "$GROUND" \
-  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" <<'PY'
+  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" "$MACRO_PLACEMENT" "$MACRO_HALO" <<'PY'
 import json, sys
-k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground".split()
+k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground macro_placement macro_halo".split()
 a = dict(zip(k, sys.argv[2:]))
 a["pin_power"], a["pin_ground"] = a["pin_power"].split(), a["pin_ground"].split()
+a["macro_halo"] = a["macro_halo"].split()
 json.dump(a, open(sys.argv[1], "w"), indent=1)
 PY
 echo "pdk:     $PDK · $LIB · $(dirname "$(dirname "$TLEF")")"
@@ -219,7 +229,9 @@ fi
 # 1 ── a design database, from LEF + Verilog ─────────────────────────────────────────────────
 # The FIRST --lef creates the technology; the tech LEF therefore goes first.
 step "1 · import — LEF + Verilog into a database"
-"$ODB" import --lef "$TLEF" --lef "$CLEF" --verilog "$SRC" \
+MLEF=()
+for f in "${MACRO_LEFS[@]}"; do MLEF+=(--lef "$f"); done
+"$ODB" import --lef "$TLEF" --lef "$CLEF" "${MLEF[@]}" --verilog "$SRC" \
               --output "$OUT/1.handoff.odb" 2>&1 | sed 's/^/  /'
 
 # 2 ── the floorplan ─────────────────────────────────────────────────────────────────────────
@@ -230,10 +242,22 @@ step "2 · ifp — die, core and rows"
 step "3 · ifp make-tracks — routing tracks from the technology's own pitches"
 "$IFP" make-tracks "$OUT/2.floorplan.odb" --out-odb "$OUT/3.tracks.odb" 2>&1 | sed 's/^/  /'
 
+# 3m ── hard macros, placed and fixed before the rows are cut around them ─────────────────────
+TAPIN=$OUT/3.tracks.odb
+if [ -n "$MACRO_PLACEMENT" ]; then
+  step "3m · macro placement — each macro where $MACRO_PLACEMENT puts it, fixed"
+  "$ODB" manual-macro-placement --input "$OUT/3.tracks.odb" --output "$OUT/3m.macros.odb" \
+         --placement "$MACRO_PLACEMENT" --fixed 2>&1 | sed 's/^/  /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "macro placement failed" >&2; exit 1; }
+  TAPIN=$OUT/3m.macros.odb
+fi
+
 # 4 ── taps and endcaps ──────────────────────────────────────────────────────────────────────
 step "4 · tap — cut the rows, place endcaps and well taps"
-"$TAP" tapcell "$OUT/3.tracks.odb" --tapcell-master "$TAPCELL" --endcap-master "$ENDCAP" \
-       --distance "$TAPDIST" --out-odb "$OUT/4.tap.odb" 2>&1 | sed 's/^/  /'
+HALO=()
+if [ -n "$MACRO_HALO" ]; then read -r HX HY <<<"$MACRO_HALO"; HALO=(--halo-width-x "$HX" --halo-width-y "$HY"); fi
+"$TAP" tapcell "$TAPIN" --tapcell-master "$TAPCELL" --endcap-master "$ENDCAP" \
+       --distance "$TAPDIST" "${HALO[@]}" --out-odb "$OUT/4.tap.odb" 2>&1 | sed 's/^/  /'
 
 # 5 ── the supply nets ───────────────────────────────────────────────────────────────────────
 # Without this there are no supply nets to build a grid on, and step 6 has nothing to do.

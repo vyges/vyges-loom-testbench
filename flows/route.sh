@@ -33,6 +33,7 @@
 #   --no-antenna-repair   route without repairing; the ant check still reports
 #   --threads N           detailed-routing worker threads (default: every CPU); the routes are the
 #                         same at any count
+#   --macro-lef FILE      a hard macro's LEF (repeatable), when the input is a DEF
 #   --dont-use FILE       cells the routed design must not contain (default: the PDK store's
 #                         `dont_use` for the library); any found is reported and exits 1
 #   --pdk / --library / --pdk-root    as in ./floorplan.sh
@@ -47,6 +48,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
 ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS=
+MACRO_LEFS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -62,6 +64,7 @@ while [ $# -gt 0 ]; do
     --antenna-margin) ANT_MARGIN=$2; shift 2 ;;
     --no-antenna-repair) ANT_REPAIR=false; shift ;;
     --dont-use)   DONT_USE_FILE=$2; shift 2 ;;
+    --macro-lef)  MACRO_LEFS+=("$2"); shift 2 ;;
     --threads)    THREADS=$2; shift 2 ;;
     --pdk)        PDK=$2; shift 2 ;;
     --library)    LIB=$2; shift 2 ;;
