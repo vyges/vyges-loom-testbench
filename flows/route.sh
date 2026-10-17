@@ -31,8 +31,9 @@
 #   --antenna-iterations N  repair passes at most          (default 3)
 #   --antenna-margin PCT  repair to this margin under each antenna limit (default 10)
 #   --no-antenna-repair   route without repairing; the ant check still reports
-#   --threads N           detailed-routing worker threads (default: every CPU); the routes are the
-#                         same at any count
+#   --threads N           detailed-routing worker threads (default: a balanced count from the
+#                         machine's physical cores; VYGES_THREADS sets it for every engine); the
+#                         routes are the same at any count
 #   --macro-lef FILE      a hard macro's LEF (repeatable), when the input is a DEF
 #   --dont-use FILE       cells the routed design must not contain (default: the PDK store's
 #                         `dont_use` for the library); any found is reported and exits 1
@@ -128,9 +129,9 @@ fi
 step "2 · drt — wires and vias, repaired until no design-rule marker stands"
 # Each search-and-repair batch's workers in parallel, written back in batch order: the same routes
 # at any thread count.
-THREADS=${THREADS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)}
-echo "  drt threads: $THREADS"
-rc=0; VYGES_DRT_THREADS=$THREADS runq "$DRT" detailed_route --db "$OUT/r1.grt.odb" --out "$OUT/routed.odb" -o "$OUT/r2.drt.json" || rc=$?
+# Unset, the engine picks a balanced count from the machine (VYGES_THREADS overrides it) and says so.
+TFLAG=(); [ -n "$THREADS" ] && TFLAG=(--threads "$THREADS")
+rc=0; runq "$DRT" detailed_route --db "$OUT/r1.grt.odb" --out "$OUT/routed.odb" -o "$OUT/r2.drt.json" "${TFLAG[@]+"${TFLAG[@]}"}" || rc=$?
 echo "  drt: $(jget "$OUT/r2.drt.json" status) $(jget "$OUT/r2.drt.json" reason)"
 # markers (1) is a finding: the design is routed and written, so the rest still runs.
 [ "$rc" -le 1 ] || exit "$rc"
