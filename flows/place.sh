@@ -104,13 +104,7 @@ echo "engines: $(dirname "$GPL")"
 # default, and only commands every stage here reads.
 if [ -z "$SDC" ]; then
   SDC=$OUT/p0.design.sdc
-  IOD=$("$PY" -c 'import sys; print(float(sys.argv[1]) * float(sys.argv[2]) / 100)' "$CLOCK_PERIOD" "$IO_DELAY")
-  cat > "$SDC" <<EOF
-create_clock -name $CLOCK_PORT -period $CLOCK_PERIOD [get_ports {$CLOCK_PORT}]
-set_input_delay $IOD -clock $CLOCK_PORT [all_inputs]
-set_output_delay $IOD -clock $CLOCK_PORT [all_outputs]
-set_max_fanout 10 [current_design]
-EOF
+  sdc_write "$SDC" "$CLOCK_PORT" "$CLOCK_PERIOD" "$IO_DELAY"
 fi
 
 # 1 ── the IO pins ────────────────────────────────────────────────────────────────────────────

@@ -100,6 +100,21 @@ PYEOF
   else echo "  dont_use: no excluded cell in the design"; fi
 }
 
+# The constraints a flow generates from the clock: one clock, every input and output delayed by
+# a percentage of its period, fanout limited — the shape an open flow writes by default, and only
+# commands every engine here reads. place.sh and timing.sh write the same file.
+#   sdc_write FILE CLOCK_PORT PERIOD_NS IO_DELAY_PCT
+sdc_write() {
+  local iod
+  iod=$("$PY" -c 'import sys; print(float(sys.argv[1]) * float(sys.argv[2]) / 100)' "$3" "$4")
+  cat > "$1" <<EOF
+create_clock -name $2 -period $3 [get_ports {$2}]
+set_input_delay $iod -clock $2 [all_inputs]
+set_output_delay $iod -clock $2 [all_outputs]
+set_max_fanout 10 [current_design]
+EOF
+}
+
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 # Run one engine, indent its log, and keep its exit status (a pipe would otherwise report sed's).

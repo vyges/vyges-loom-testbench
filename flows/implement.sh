@@ -6,15 +6,16 @@
 # This script is licensed under the Apache License, Version 2.0; see LICENSE and NOTICE.
 # http://www.apache.org/licenses/LICENSE-2.0
 #
-# Netlist to routed design with the Vyges Loom engines: the three flow scripts, one after another,
-# each reading what the last one wrote.
+# Netlist to routed design with the Vyges Loom engines: the flow scripts, one after another, each
+# reading what the last one wrote — the netlist timed first, as an open flow times it before
+# placement.
 #
-#     floorplan.sh  ->  place.sh  ->  route.sh
+#     timing.sh  ->  floorplan.sh  ->  place.sh  ->  route.sh
 #
 #   ./flows/implement.sh --netlist build/my_block.v --die-area '0 0 400 400' \
 #                        --clock-port clk_i --clock-period 50
 #
-# Every option belongs to one of the three scripts and is handed to it; see each script's --help.
+# Every option belongs to one of the scripts and is handed to it; see each script's --help.
 # Two more are this script's own:
 #
 #   --through floorplan|place|route   stop after that segment (default route)
@@ -36,15 +37,19 @@ ROUTE_FLAG=" --no-congestion --no-antenna-repair "
 SHARED_VAL=" --pdk --library --pdk-root --bin --macro-lef "
 # Place and route both take these (floorplan inserts no cells).
 PR_VAL=" --dont-use "
+# timing.sh takes these of place.sh's, the shared ones, and the netlist.
+TIMING_VAL=" --clock-port --clock-period --io-delay --sdc --macro-lib --corner --pdk --library --pdk-root --bin --macro-lef "
 
-THROUGH=route OUT=build FP=() PL=() RT=()
+THROUGH=route OUT=build FP=() PL=() RT=() TM=()
 while [ $# -gt 0 ]; do
   case " $1 " in
     " --through ") THROUGH=$2; shift 2 ;;
     " --out ")     OUT=$2; shift 2 ;;
     " -h "|" --help ")
       awk '!/^#/ && NR>1 {exit} /SPDX|©|licensed under the Apache|apache[.]org/ {next} NR>1 {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" | sed '/./,$!d'; exit 0 ;;
+    " --netlist ") FP+=("$1" "$2"); TM+=("$1" "$2"); shift 2 ;;
     *)
+      [[ $TIMING_VAL == *" $1 "* ]] && TM+=("$1" "$2")
       if   [[ $SHARED_VAL == *" $1 "* ]]; then FP+=("$1" "$2"); PL+=("$1" "$2"); RT+=("$1" "$2"); shift 2
       elif [[ $PR_VAL     == *" $1 "* ]]; then PL+=("$1" "$2"); RT+=("$1" "$2"); shift 2
       elif [[ $PLACE_VAL  == *" $1 "* ]]; then PL+=("$1" "$2"); shift 2
@@ -59,6 +64,9 @@ case $THROUGH in floorplan|place|route) ;; *) echo "error: --through floorplan|p
 
 banner() { printf '\n\033[1;7m %s \033[0m\n' "$*"; }
 T0=$(date +%s)
+banner "timing (before placement)"
+"$HERE/timing.sh" --out "$OUT" "${TM[@]+"${TM[@]}"}"
+
 banner "floorplan"
 "$HERE/floorplan.sh" --out "$OUT" "${FP[@]+"${FP[@]}"}"
 [ "$THROUGH" = floorplan ] && exit 0
