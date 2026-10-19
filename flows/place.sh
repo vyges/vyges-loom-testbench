@@ -8,8 +8,15 @@
 #
 # Place a floorplanned design with the Vyges Loom engines.
 #
-#     io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts
-#             ->  dpl legalize (the clock buffers)  ->  dpl check
+#     io pins  ->  gpl  ->  timing  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts
+#             ->  rsz repair_clock_nets  ->  dpl legalize (the clock buffers)  ->  dpl check  ->  timing
+#             ->  rsz repair_timing (setup, then hold)  ->  dpl legalize  ->  dpl check  ->  timing
+#
+# The timing steps (./timing.sh) report where the design stands, wires estimated from the
+# placement: after global placement, after the clock tree and after the timing repair, every
+# clock propagated once the tree is built. The timing repair runs as an open flow runs it after
+# the clock tree: setup paths first, then hold, each with a slack margin and a cap on the buffers
+# it may add, and the cells it moved or added legalized after.
 #
 # The input is a floorplan: the DEF ./floorplan.sh writes, or any DEF with rows, tracks and a
 # power grid. The output is a legal placement, as a database and a DEF, ready for ./route.sh.
@@ -35,6 +42,9 @@
 #   --dont-use FILE       cells no engine may insert (rsz, cts): names or globs, whitespace-separated, '#' comments
 #                         (default: the PDK store's `dont_use` for the library, if it has one)
 #   --skip-repair         do not run rsz repair_design
+#   --setup-margin NS / --hold-margin NS    timing repair's slack margins (default 0.05 / 0.1)
+#   --max-buffer-percent P  timing repair's cap on added buffers, percent of the instances (default 50)
+#   --skip-timing-repair  do not run rsz repair_timing after the clock tree
 #   --ideal-clock         carry on when cts does not build a clock tree (the clock stays ideal)
 #   --pdk / --library / --corner / --pdk-root    as in ./floorplan.sh (corner default tt_025C_1v80)
 #   --out DIR             where to write (default ./build)
@@ -50,6 +60,7 @@ DEF= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC=
 IO_H=met3 IO_V=met2 SIG_RC=met2 CLK_RC=met5 SLEW=20 CAP=20
 CLKBUFS='sky130_fd_sc_hd__clkbuf_4 sky130_fd_sc_hd__clkbuf_8' ROOTBUF=sky130_fd_sc_hd__clkbuf_16
 SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY= CLK_MAX_WL=0 DONT_USE_FILE=
+SETUP_MARGIN=0.05 HOLD_MARGIN=0.1 MAX_BUF_PCT=50 SKIP_TIMING_REPAIR=0
 MACRO_LEFS=() MACRO_LIBS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
@@ -74,6 +85,10 @@ while [ $# -gt 0 ]; do
     --macro-lef)    MACRO_LEFS+=("$2"); shift 2 ;;
     --macro-lib)    MACRO_LIBS+=("$2"); shift 2 ;;
     --skip-repair)  SKIP_REPAIR=1; shift ;;
+    --setup-margin) SETUP_MARGIN=$2; shift 2 ;;
+    --hold-margin)  HOLD_MARGIN=$2; shift 2 ;;
+    --max-buffer-percent) MAX_BUF_PCT=$2; shift 2 ;;
+    --skip-timing-repair) SKIP_TIMING_REPAIR=1; shift ;;
     --ideal-clock)  IDEAL_CLOCK=1; shift ;;
     --pdk)          PDK=$2; shift 2 ;;
     --library)      LIB=$2; shift 2 ;;
@@ -130,6 +145,20 @@ runq "$GPL" global_placement "$OUT/p2.gpl.job.json" -o "$OUT/p2.gpl.json" || {
   rc=$?; echo "  gpl: $(jget "$OUT/p2.gpl.json" status) — $(jget "$OUT/p2.gpl.json" reason)"; exit "$rc"; }
 echo "  $(jget "$OUT/p2.gpl.json" status): $(jget "$OUT/p2.gpl.json" insts) instances"
 PLACED=$OUT/p2.gpl.def
+
+# The arguments every timing step here shares.
+timing() {
+  local m=() f
+  for f in "${MACRO_LEFS[@]+"${MACRO_LEFS[@]}"}"; do m+=(--macro-lef "$f"); done
+  for f in "${MACRO_LIBS[@]+"${MACRO_LIBS[@]}"}"; do m+=(--macro-lib "$f"); done
+  "$HERE/timing.sh" --sdc "$SDC" --signal-rc-layer "$SIG_RC" --clock-rc-layer "$CLK_RC" \
+    --pdk "$PDK" --library "$LIB" --corner "$CORNER" --out "$OUT" ${BIN:+--bin "$BIN"} "${m[@]+"${m[@]}"}" "$@"
+}
+
+step "2b · timing — after global placement, wires estimated from it"
+def_to_odb "$PLACED" "$OUT/p2.gpl.odb"
+timing --odb "$OUT/p2.gpl.odb" --label m1.gpl 2>&1 | sed 's/^/  /'
+[ "${PIPESTATUS[0]}" -eq 0 ] || exit 2
 
 # 3 ── electrical repair ─────────────────────────────────────────────────────────────────────
 if [ "$SKIP_REPAIR" = 1 ]; then
@@ -225,6 +254,52 @@ if [ "$rc" -eq 0 ]; then
   echo "  $(jget "$OUT/p8.check.json" status): $(jget "$OUT/p8.check.json" violations) violations over $(jget "$OUT/p8.check.json" cells_checked) cells"
   [ "$crc" -eq 0 ] || exit "$crc"
   FINAL=$OUT/p7.legal.odb
+
+  step "9 · timing — the clock tree built, every clock propagated"
+  timing --odb "$FINAL" --propagated --label m2.cts 2>&1 | sed 's/^/  /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || exit 2
+fi
+
+# 10 ── timing repair, the clock tree built ─────────────────────────────────────────────────
+TRC=skipped trc=1
+if [ "$rc" -eq 0 ] && [ "$SKIP_TIMING_REPAIR" = 0 ]; then
+  step "10 · rsz repair_timing — setup, then hold, the clock tree propagated"
+  cat > "$OUT/p9.rt.job.json" <<EOF
+{"steps": [
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(macro_lib_steps)$(dont_use_step)
+  {"cmd": "read_db", "args": ["$FINAL"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
+  {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
+  {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
+  {"cmd": "set_propagated_clock", "args": []},
+  {"cmd": "estimate_parasitics", "args": ["-placement"]},
+  {"cmd": "repair_timing", "args": ["-verbose", "-setup", "-setup_margin", "$SETUP_MARGIN", "-max_buffer_percent", "$MAX_BUF_PCT"]},
+  {"cmd": "repair_timing", "args": ["-verbose", "-hold", "-setup_margin", "$SETUP_MARGIN", "-hold_margin", "$HOLD_MARGIN", "-max_buffer_percent", "$MAX_BUF_PCT"]}],
+ "write_db": "$OUT/p9.rt.odb"}
+EOF
+  trc=0; runq "$RSZ" repair_design "$OUT/p9.rt.job.json" -o "$OUT/p9.rt.json" || trc=$?
+  TRC=$(jget "$OUT/p9.rt.json" status)
+  echo "  rsz: $TRC $(jget "$OUT/p9.rt.json" reason)"
+  # A refusal names something the engine does not model: the design goes on as the clock tree
+  # left it, and the result says so. Anything else stops the flow.
+  if [ "$trc" -eq 3 ]; then
+    echo "  the timing repair declined this design; it continues unrepaired (--skip-timing-repair skips the attempt)." >&2
+  elif [ "$trc" -ne 0 ]; then
+    exit "$trc"
+  fi
+fi
+if [ "$rc" -eq 0 ] && [ "$SKIP_TIMING_REPAIR" = 0 ] && [ "$trc" -eq 0 ]; then
+  step "11 · dpl — the repaired cells onto legal sites"
+  "$DPL" detailed-placement "$OUT/p9.rt.odb" --out-odb "$OUT/p10.legal.odb" \
+         > "$OUT/p10.dpl.json" 2> >(sed 's/^/  /' >&2)
+  echo "  $(jget "$OUT/p10.dpl.json" status): $(jget "$OUT/p10.dpl.json" moved) of $(jget "$OUT/p10.dpl.json" cells) cells moved ($(jget "$OUT/p10.dpl.json" legalizer) legalizer)"
+  step "12 · dpl check-placement — every rule family, after the timing repair"
+  crc=0; runq "$DPL" check-placement "$OUT/p10.legal.odb" -o "$OUT/p11.check.json" || crc=$?
+  echo "  $(jget "$OUT/p11.check.json" status): $(jget "$OUT/p11.check.json" violations) violations over $(jget "$OUT/p11.check.json" cells_checked) cells"
+  [ "$crc" -eq 0 ] || exit "$crc"
+  FINAL=$OUT/p10.legal.odb
+  step "13 · timing — after the timing repair"
+  timing --odb "$FINAL" --propagated --label m3.rt 2>&1 | sed 's/^/  /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || exit 2
 fi
 
 # ── what came out ───────────────────────────────────────────────────────────────────────────
@@ -237,4 +312,5 @@ printf '  %-14s %s\n' \
   "io pins"  "$(jget "$OUT/p1.ppl.json" pins_placed)" \
   repair     "$([ "$SKIP_REPAIR" = 1 ] && echo skipped || jget "$OUT/p3.rsz.json" status)" \
   legal      "$(jget "$OUT/p5.check.json" status)" \
-  "clock tree" "$([ "$rc" -eq 0 ] && jget "$OUT/p6.cts.json" status || echo 'ideal (not built)')"
+  "clock tree" "$([ "$rc" -eq 0 ] && jget "$OUT/p6.cts.json" status || echo 'ideal (not built)')" \
+  "timing repair" "$TRC"

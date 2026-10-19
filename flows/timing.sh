@@ -6,18 +6,26 @@
 # This script is licensed under the Apache License, Version 2.0; see LICENSE and NOTICE.
 # http://www.apache.org/licenses/LICENSE-2.0
 #
-# Time a design with the Vyges Loom static timing engine before it is placed: the synthesized
-# netlist, the cell (and hard-macro) libraries and the constraints, with no wires yet. Each path
-# group's worst setup and hold path is reported, then the worst and total negative slack.
+# Time a design with the Vyges Loom static timing engine, as an open flow times it between its
+# steps: each path group's worst setup and hold path, then the worst and total negative slack.
 #
-#   ./flows/timing.sh --netlist build/my_block.v --clock-port clk_i --clock-period 50
+#   before placement — the synthesized netlist, the libraries and the constraints, no wires:
+#     ./flows/timing.sh --netlist build/my_block.v --clock-port clk_i --clock-period 50
+#   during placement — a placed database: its netlist written out, every net's wire estimated
+#   from the placement (as SPEF), then timed; --propagated once a clock tree is built:
+#     ./flows/timing.sh --odb build/p2.gpl.odb --sdc build/p0.design.sdc --label m1.gpl
 #
-# A violation is REPORTED, not failed on: timing this early says where the design starts, and
-# placement and repair are still to come. ./implement.sh runs it first.
+# A violation is REPORTED, not failed on: timing mid-flow says where the design stands, and
+# repair is still to come. ./implement.sh runs it first; ./place.sh after global placement and
+# after the clock tree.
 #
 # OPTIONS
-#   --netlist FILE        structural gate-level Verilog (required)
-#   --top NAME            its top module (default: the one module no other instantiates)
+#   --netlist FILE        structural gate-level Verilog (one of --netlist / --odb is required)
+#   --odb FILE            a placed database (opendb): timed with its wires estimated
+#   --top NAME            the top module of --netlist (default: the one module no other instantiates)
+#   --signal-rc-layer L   with --odb: layer whose RC estimates signal wires (default met2)
+#   --clock-rc-layer L    with --odb: layer whose RC estimates clock wires  (default met5)
+#   --propagated          every clock propagated through its network (after a clock tree)
 #   --clock-port NAME     the clock input                       (required unless --sdc is given)
 #   --clock-period NS     its period, nanoseconds               (required unless --sdc is given)
 #   --io-delay PCT        input/output delay, percent of the period, for the generated SDC (default 20)
@@ -33,19 +41,24 @@
 # OUTPUT  <label>.tcl  the script the timer ran (libraries, netlist, constraints, reports)
 #         <label>.rpt  its report
 #         <label>.args.json  the LEFs and top module, so another tool can replay the same script
+#         with --odb also <label>.v (the netlist) and <label>.spef (the estimated wires)
 #
 # EXIT STATUS: 0 timed (whatever the slack) · 2 error
 #
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-NETLIST= TOP= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC= DIGITS=4 LABEL=t0.pre
+NETLIST= IN_ODB= SIG_RC=met2 CLK_RC=met5 PROPAGATED=0 TOP= CLOCK_PORT= CLOCK_PERIOD= IO_DELAY=20 SDC= DIGITS=4 LABEL=t0.pre
 MACRO_LEFS=() MACRO_LIBS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
   case $1 in
     --netlist)      NETLIST=$2; shift 2 ;;
+    --odb)          IN_ODB=$2; shift 2 ;;
+    --signal-rc-layer) SIG_RC=$2; shift 2 ;;
+    --clock-rc-layer)  CLK_RC=$2; shift 2 ;;
+    --propagated)   PROPAGATED=1; shift ;;
     --top)          TOP=$2; shift 2 ;;
     --clock-port)   CLOCK_PORT=$2; shift 2 ;;
     --clock-period) CLOCK_PERIOD=$2; shift 2 ;;
@@ -67,13 +80,24 @@ while [ $# -gt 0 ]; do
 done
 . "$HERE/_common.sh"
 
-[ -n "$NETLIST" ] && [ -f "$NETLIST" ] || { echo "error: --netlist <gate-level.v> is required and must exist." >&2; exit 2; }
+if [ -n "$IN_ODB" ]; then
+  [ -f "$IN_ODB" ] || { echo "error: no such database: $IN_ODB" >&2; exit 2; }
+else
+  [ -n "$NETLIST" ] && [ -f "$NETLIST" ] || { echo "error: --netlist <gate-level.v> or --odb <placed.odb> is required." >&2; exit 2; }
+fi
 if [ -z "$SDC" ] && { [ -z "$CLOCK_PORT" ] || [ -z "$CLOCK_PERIOD" ]; }; then
   echo "error: give --clock-port and --clock-period, or --sdc FILE." >&2; exit 2
 fi
 STA=$(eng sta-si)
 pdk_resolve
 mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+if [ -n "$IN_ODB" ]; then
+  # the placed database's netlist, as the timer reads a netlist
+  IN_ODB=$(cd "$(dirname "$IN_ODB")" && pwd)/$(basename "$IN_ODB")
+  NETLIST=$OUT/$LABEL.v
+  runq "$(eng opendb)" write-verilog --input "$IN_ODB" --output "$NETLIST"
+fi
 NETLIST=$(cd "$(dirname "$NETLIST")" && pwd)/$(basename "$NETLIST")
 
 # The top module: named, or the one no other module instantiates.
@@ -94,9 +118,39 @@ if [ -z "$SDC" ]; then
   SDC=$OUT/$LABEL.sdc
   sdc_write "$SDC" "$CLOCK_PORT" "$CLOCK_PERIOD" "$IO_DELAY"
 fi
-step "$TOP — timing before placement (no wires)"
+if [ -n "$IN_ODB" ]; then
+  step "$TOP — timing of $(basename "$IN_ODB"), wires estimated from the placement"
+else
+  step "$TOP — timing before placement (no wires)"
+fi
 echo "pdk:     $PDK · $LIB · $CORNER"
 echo "engines: $(dirname "$STA")"
+
+# Every net's wire, estimated from the placement as the reference estimates it, written as SPEF.
+# The clock sources (from the constraints) take the clock layer's RC.
+SPEF=
+if [ -n "$IN_ODB" ]; then
+  SPEF=$OUT/$LABEL.spef
+  CLKS=$("$PY" - "$SDC" <<'PY'
+import json, re, sys
+srcs = []
+for m in re.finditer(r"create_clock\b[^\n]*\[get_ports\s+\{?([^\]\}]+)\}?\]", open(sys.argv[1]).read()):
+    srcs += m.group(1).split()
+print(", ".join(json.dumps(s) for s in srcs))
+PY
+)
+  {
+    printf '{"steps": [{"cmd": "read_db", "args": ["%s"]}, {"cmd": "read_liberty", "args": ["%s"]},' "$IN_ODB" "$LIBERTY"
+    for f in "${MACRO_LIBS[@]+"${MACRO_LIBS[@]}"}"; do printf ' {"cmd": "read_liberty", "args": ["%s"]},' "$f"; done
+    [ -n "$CLKS" ] && printf ' {"cmd": "create_clock", "args": [%s]},' "$CLKS"
+    [ "$PROPAGATED" = 1 ] && printf ' {"cmd": "set_propagated_clock", "args": []},'
+    printf ' {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "%s"]}, {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "%s"]},' "$SIG_RC" "$CLK_RC"
+    printf ' {"cmd": "estimate_parasitics", "args": ["-placement", "-spef_file", "%s"]}]}\n' "$SPEF"
+  } > "$OUT/$LABEL.est.json"
+  rc=0; runq "$(eng est)" estimate "$OUT/$LABEL.est.json" -o "$OUT/$LABEL.est.out" || rc=$?
+  [ "$rc" -eq 0 ] || { echo "error: the wire estimate stopped (exit $rc); see $OUT/$LABEL.est.out" >&2; exit 2; }
+  echo "  $(jget "$OUT/$LABEL.est.out" nets) nets estimated"
+fi
 
 # The script, as the timer runs it and as any other timer would read it.
 SCRIPT=$OUT/$LABEL.tcl
@@ -106,6 +160,8 @@ SCRIPT=$OUT/$LABEL.tcl
   echo "read_verilog $NETLIST"
   echo "link_design $TOP"
   echo "read_sdc $SDC"
+  [ "$PROPAGATED" = 1 ] && echo "set_propagated_clock [all_clocks]"
+  [ -n "$SPEF" ] && echo "read_spef $SPEF"
   echo "report_checks -path_delay max -fields {slew cap} -digits $DIGITS"
   echo "report_checks -path_delay min -fields {slew cap} -digits $DIGITS"
   echo "report_wns -digits $DIGITS"
@@ -113,9 +169,11 @@ SCRIPT=$OUT/$LABEL.tcl
   echo "report_wns -min -digits $DIGITS"
   echo "report_tns -min -digits $DIGITS"
 } > "$SCRIPT"
-"$PY" - "$OUT/$LABEL.args.json" "$TOP" "$TLEF" "$CLEF" "${MACRO_LEFS[@]+"${MACRO_LEFS[@]}"}" <<'PY'
+"$PY" - "$OUT/$LABEL.args.json" "$TOP" "$IN_ODB" "$SIG_RC" "$CLK_RC" "$PROPAGATED" "$TLEF" "$CLEF" "${MACRO_LEFS[@]+"${MACRO_LEFS[@]}"}" <<'PY'
 import json, sys
-json.dump({"top": sys.argv[2], "lefs": sys.argv[3:]}, open(sys.argv[1], "w"), indent=1)
+a = sys.argv
+json.dump({"top": a[2], "odb": a[3], "signal_rc_layer": a[4], "clock_rc_layer": a[5],
+           "propagated": a[6] == "1", "lefs": a[7:]}, open(a[1], "w"), indent=1)
 PY
 
 RPT=$OUT/$LABEL.rpt

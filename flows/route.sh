@@ -8,14 +8,21 @@
 #
 # Route a placed design with the Vyges Loom engines, repairing antennas on the way, then check it.
 #
-#     grt (route, then repair antennas)  ->  dpl check  ->  drt  ->  write DEF  ->  ant
+#     grt (route, then repair antennas)  ->  dpl check  ->  rsz repair_timing (on the global routes)
+#         ->  dpl legalize  ->  dpl check  ->  grt (route again)  ->  drt  ->  write DEF  ->  ant  ->  fill
+#
+# The timing repair runs as an open flow runs it after global routing: the design routed again
+# inside it and timed on those routes, setup paths first, then hold, each with a slack margin and a
+# cap on the buffers it may add; the cells it moved or added legalized, and the whole design routed
+# again for the detailed router. A design the repair declines goes on as the antenna repair left it.
 #
 # Antenna repair runs inside the global router, on its routes: jumpers first, then a diode beside
 # each gate still in violation, the diodes legalized onto the rows, and the nets they touched
 # rerouted, repeated up to --antenna-iterations times. The defaults are the open flow's.
 #
 # The input is a placed design: the database ./place.sh writes, or any placed DEF. The output is
-# a routed database and DEF.
+# a routed database and DEF, and the same with every empty site filled — decap cells first, then
+# filler cells, as an open flow fills a routed block before streaming it out.
 #
 #   ./flows/route.sh --odb build/placed.odb
 #   ./flows/route.sh --def my_placed_block.def
@@ -31,6 +38,16 @@
 #   --antenna-iterations N  repair passes at most          (default 3)
 #   --antenna-margin PCT  repair to this margin under each antenna limit (default 10)
 #   --no-antenna-repair   route without repairing; the ant check still reports
+#   --sdc FILE            the constraints the timing repair reads (default: p0.design.sdc in --out,
+#                         as ./place.sh writes it; with none the repair is skipped and says so)
+#   --macro-lib FILE      a hard macro's Liberty (repeatable), for the timing repair
+#   --signal-rc-layer L / --clock-rc-layer L    as in ./place.sh (default met2 / met5)
+#   --grt-setup-margin NS / --grt-hold-margin NS    the repair's slack margins (default 0.025 / 0.05)
+#   --grt-max-buffer-percent P   its cap on added buffers, percent of the instances (default 50)
+#   --skip-timing-repair  do not run rsz repair_timing after global routing
+#   --fill-cells 'PATTERNS'  masters to fill empty sites with, tried in order (names or globs;
+#                         default sky130 hd's decaps then fills)
+#   --no-fill             leave the empty sites empty
 #   --threads N           detailed-routing worker threads (default: a balanced count from the
 #                         machine's physical cores; VYGES_THREADS sets it for every engine); the
 #                         routes are the same at any count
@@ -48,7 +65,9 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
-ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS=
+ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS= FILL=true
+SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=true
+FILL_CELLS='sky130_ef_sc_hd__decap_12 sky130_fd_sc_hd__decap_8 sky130_fd_sc_hd__decap_6 sky130_fd_sc_hd__decap_4 sky130_fd_sc_hd__decap_3 sky130_fd_sc_hd__fill*'
 MACRO_LEFS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
@@ -67,6 +86,17 @@ while [ $# -gt 0 ]; do
     --dont-use)   DONT_USE_FILE=$2; shift 2 ;;
     --macro-lef)  MACRO_LEFS+=("$2"); shift 2 ;;
     --threads)    THREADS=$2; shift 2 ;;
+    --fill-cells) FILL_CELLS=$2; shift 2 ;;
+    --sdc)        SDC=$2; shift 2 ;;
+    --macro-lib)  MACRO_LIBS+=("$2"); shift 2 ;;
+    --signal-rc-layer) SIG_RC=$2; shift 2 ;;
+    --clock-rc-layer)  CLK_RC=$2; shift 2 ;;
+    --corner)     CORNER=$2; shift 2 ;;
+    --grt-setup-margin) GRT_SETUP_MARGIN=$2; shift 2 ;;
+    --grt-hold-margin)  GRT_HOLD_MARGIN=$2; shift 2 ;;
+    --grt-max-buffer-percent) GRT_MAX_BUF_PCT=$2; shift 2 ;;
+    --skip-timing-repair) TIMING_REPAIR=false; shift ;;
+    --no-fill)    FILL=false; shift ;;
     --pdk)        PDK=$2; shift 2 ;;
     --library)    LIB=$2; shift 2 ;;
     --pdk-root)   export PDK_ROOT=$2; shift 2 ;;
@@ -78,7 +108,7 @@ while [ $# -gt 0 ]; do
 done
 . "$HERE/_common.sh"
 
-ODB=$(eng opendb); GRT=$(eng grt); DRT=$(eng drt); ANT=$(eng ant); DPL=$(eng dpl)
+ODB=$(eng opendb); GRT=$(eng grt); DRT=$(eng drt); ANT=$(eng ant); DPL=$(eng dpl); RSZ=$(eng rsz)
 mkdir -p "$OUT"
 if [ -n "$IN_DEF" ]; then
   [ -f "$IN_DEF" ] || { echo "error: no such DEF: $IN_DEF" >&2; exit 2; }
@@ -125,13 +155,71 @@ if [ "$ANT_REPAIR" = true ]; then
   [ "$rc" -eq 0 ] || exit "$rc"
 fi
 
+# 1c ── timing repair on the global routes ─────────────────────────────────────────────────────
+DRT_IN=$OUT/r1.grt.odb GTRC=skipped
+[ -z "$SDC" ] && [ -f "$OUT/p0.design.sdc" ] && SDC=$OUT/p0.design.sdc
+if [ "$TIMING_REPAIR" = true ] && [ -z "$SDC" ]; then
+  step "1c · rsz repair_timing — skipped: no constraints (--sdc)"
+elif [ "$TIMING_REPAIR" = true ]; then
+  step "1c · rsz repair_timing — setup, then hold, on the global routes"
+  pdk_resolve
+  dont_use_resolve
+  cat > "$OUT/r1c.rt.job.json" <<EOF
+{"steps": [
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(macro_lib_steps)$(dont_use_step)
+  {"cmd": "read_db", "args": ["$OUT/r1.grt.odb"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
+  {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
+  {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
+  {"cmd": "set_propagated_clock", "args": []},
+  {"cmd": "set_routing_layers", "args": ["-signal", "$MINL-$MAXL", "-clock", "$MINL-$MAXL"]},
+  {"cmd": "set_global_routing_layer_adjustment", "args": ["*", "$ADJ"]},
+  {"cmd": "global_route", "args": []},
+  {"cmd": "estimate_parasitics", "args": ["-global_routing"]},
+  {"cmd": "repair_timing", "args": ["-verbose", "-setup", "-setup_margin", "$GRT_SETUP_MARGIN", "-max_buffer_percent", "$GRT_MAX_BUF_PCT"]},
+  {"cmd": "repair_timing", "args": ["-verbose", "-hold", "-setup_margin", "$GRT_SETUP_MARGIN", "-hold_margin", "$GRT_HOLD_MARGIN", "-max_buffer_percent", "$GRT_MAX_BUF_PCT"]}],
+ "write_db": "$OUT/r1c.rt.odb"}
+EOF
+  trc=0; runq "$RSZ" repair_design "$OUT/r1c.rt.job.json" -o "$OUT/r1c.rt.json" || trc=$?
+  GTRC=$(jget "$OUT/r1c.rt.json" status)
+  echo "  rsz: $GTRC $(jget "$OUT/r1c.rt.json" reason)"
+  if [ "$trc" -ne 0 ]; then
+    # declined (a refusal, or a route or estimate it does not model): the design goes on as
+    # the antenna repair left it, and the result says so
+    echo "  the timing repair did not run to the end (exit $trc); the design continues unrepaired (--skip-timing-repair skips the attempt)." >&2
+    GTRC="$GTRC (not applied)"
+  else
+    step "1d · dpl — the repaired cells onto legal sites"
+    "$DPL" detailed-placement "$OUT/r1c.rt.odb" --out-odb "$OUT/r1d.legal.odb" \
+           > "$OUT/r1d.dpl.json" 2> >(sed 's/^/  /' >&2)
+    echo "  $(jget "$OUT/r1d.dpl.json" status): $(jget "$OUT/r1d.dpl.json" moved) of $(jget "$OUT/r1d.dpl.json" cells) cells moved ($(jget "$OUT/r1d.dpl.json" legalizer) legalizer)"
+    step "1e · dpl check-placement — after the timing repair"
+    rc=0; runq "$DPL" check-placement "$OUT/r1d.legal.odb" -o "$OUT/r1e.check.json" || rc=$?
+    echo "  $(jget "$OUT/r1e.check.json" status): $(jget "$OUT/r1e.check.json" violations) violations over $(jget "$OUT/r1e.check.json" cells_checked) cells"
+    [ "$rc" -eq 0 ] || exit "$rc"
+    step "1f · grt — the repaired design routed again"
+    cat > "$OUT/r1f.grt.job.json" <<EOF
+{"db": "$OUT/r1d.legal.odb",
+ "steps": [{"cmd": "set_routing_layers", "signal": ["$MINL", "$MAXL"], "clock": ["$MINL", "$MAXL"]},
+           {"cmd": "global_adjustment", "value": $ADJ},
+           {"cmd": "global_route", "allow_congestion": $CONGEST},
+           {"cmd": "write_guides", "path": "$OUT/r1f.guides"},
+           {"cmd": "write_db", "path": "$OUT/r1f.grt.odb"}]}
+EOF
+    rc=0; runq "$GRT" route "$OUT/r1f.grt.job.json" -o "$OUT/r1f.grt.json" || rc=$?
+    echo "  grt: $(jget "$OUT/r1f.grt.json" status) $(jget "$OUT/r1f.grt.json" reason)"
+    [ "$rc" -eq 0 ] || exit "$rc"
+    DRT_IN=$OUT/r1f.grt.odb
+  fi
+fi
+
 # 2 ── detailed routing ──────────────────────────────────────────────────────────────────────
 step "2 · drt — wires and vias, repaired until no design-rule marker stands"
+printf '{"db": "%s"}\n' "$DRT_IN" > "$OUT/r2.drt.args.json"
 # Each search-and-repair batch's workers in parallel, written back in batch order: the same routes
 # at any thread count.
 # Unset, the engine picks a balanced count from the machine (VYGES_THREADS overrides it) and says so.
 TFLAG=(); [ -n "$THREADS" ] && TFLAG=(--threads "$THREADS")
-rc=0; runq "$DRT" detailed_route --db "$OUT/r1.grt.odb" --out "$OUT/routed.odb" -o "$OUT/r2.drt.json" "${TFLAG[@]+"${TFLAG[@]}"}" || rc=$?
+rc=0; runq "$DRT" detailed_route --db "$DRT_IN" --out "$OUT/routed.odb" -o "$OUT/r2.drt.json" "${TFLAG[@]+"${TFLAG[@]}"}" || rc=$?
 echo "  drt: $(jget "$OUT/r2.drt.json" status) $(jget "$OUT/r2.drt.json" reason)"
 # markers (1) is a finding: the design is routed and written, so the rest still runs.
 [ "$rc" -le 1 ] || exit "$rc"
@@ -149,9 +237,21 @@ ANT_RC=0; "$ANT" check "$OUT/routed.odb" -o "$OUT/r4.ant.json" 2>/dev/null || AN
 echo "  ant: $(jget "$OUT/r4.ant.json" status)"
 [ "$ANT_RC" -le 1 ] || exit "$ANT_RC"
 
-step "result — $OUT/routed.odb (and routed.def)"
+# 5 ── fill ──────────────────────────────────────────────────────────────────────────────────
+if [ "$FILL" = true ]; then
+  step "5 · dpl filler-placement — every empty site, decaps then fillers"
+  printf '{"cells": "%s"}\n' "$FILL_CELLS" > "$OUT/r5.fill.args.json"
+  # shellcheck disable=SC2086  # each pattern its own argument, globs left to the engine
+  set -f; frc=0; "$DPL" filler-placement "$OUT/routed.odb" $FILL_CELLS --out-odb "$OUT/filled.odb" \
+    > "$OUT/r5.fill.json" 2> >(sed 's/^/  /' >&2) || frc=$?; set +f
+  [ "$frc" -eq 0 ] || exit "$frc"
+  runq "$ODB" write-def --input "$OUT/filled.odb" --output "$OUT/filled.def"
+fi
+
+step "result — $OUT/routed.odb (and routed.def$([ "$FILL" = true ] && echo "; filled.odb, filled.def"))"
 printf '  %-10s %s\n' \
   routing "$(jget "$OUT/r2.drt.json" status)" \
+  "timing repair" "$GTRC" \
   antenna "$(jget "$OUT/r4.ant.json" status)" \
   dont_use "$([ "$DONT_USE_FOUND" -eq 0 ] && echo clean || echo "$DONT_USE_FOUND excluded")"
 [ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] && [ "$DONT_USE_FOUND" -eq 0 ] || exit 1
