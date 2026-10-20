@@ -46,6 +46,8 @@
 #   --rail   L:W          followpin rail, layer and width       (default met1:0.48)
 #   --vstripe L:W:P:O     vertical strap: layer, width, pitch, offset   (default met4:1.6:153.6:16.32)
 #   --hstripe L:W:P:O     horizontal strap, same shape                  (default met5:1.6:153.18:16.65)
+#   --no-pdn-pins         keep the straps off the block's pins (default: the vertical and horizontal
+#                         strap layers become each supply's block pins, as an open flow's grid does)
 #   --macro-lef FILE      a hard macro's LEF, read after the cell library (repeatable)
 #   --macro-placement FILE   place the macros first: `instance x y orientation` per line (microns;
 #                         N S W E FN FS FW FE), each fixed (FIRM) where it is put
@@ -73,7 +75,7 @@ PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd
 POWER=VPWR GROUND=VGND
 TAPCELL=sky130_fd_sc_hd__tapvpwrvgnd_1 ENDCAP=sky130_fd_sc_hd__decap_3 TAPDIST=13
 RAIL=met1:0.48 VSTRIPE=met4:1.6:153.6:16.32 HSTRIPE=met5:1.6:153.18:16.65
-STRIP=0 CHECKDEF= OUT=build BIN=${VYGES_BIN:-}
+STRIP=0 CHECKDEF= PDN_PINS=1 OUT=build BIN=${VYGES_BIN:-}
 PIN_POWER=() PIN_GROUND=()
 MACRO_LEFS=() MACRO_PLACEMENT= MACRO_HALO= MACRO_GRID=
 
@@ -101,6 +103,7 @@ while [ $# -gt 0 ]; do
     --macro-placement) MACRO_PLACEMENT=$2; shift 2 ;;
     --macro-halo)  MACRO_HALO=$2; shift 2 ;;
     --macro-grid)  MACRO_GRID=$2; shift 2 ;;
+    --no-pdn-pins) PDN_PINS=0; shift ;;
     --strip-physical) STRIP=1; shift ;;
     --check-def)   CHECKDEF=$2; shift 2 ;;
     --out)         OUT=$2; shift 2 ;;
@@ -185,12 +188,14 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 step "$DESIGN — die [$DIE], core [$CORE], site $SITE"
 # Every setting the steps below use, so a run can be replayed (e.g. by another flow, to compare).
 "$PY" - "$OUT/0.floorplan.args.json" "$DIE" "$CORE" "$SITE" "$TAPCELL" "$ENDCAP" "$TAPDIST" "$POWER" "$GROUND" \
-  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" "$MACRO_PLACEMENT" "$MACRO_HALO" "$MACRO_GRID" <<'PY'
+  "$RAIL" "$VSTRIPE" "$HSTRIPE" "${PIN_POWER[*]}" "${PIN_GROUND[*]}" "$MACRO_PLACEMENT" "$MACRO_HALO" "$MACRO_GRID" "$PDN_PINS" <<'PY'
 import json, sys
-k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground macro_placement macro_halo macro_grid".split()
+k = "die core site tapcell endcap tap_distance power ground rail vstripe hstripe pin_power pin_ground macro_placement macro_halo macro_grid pdn_pins".split()
 a = dict(zip(k, sys.argv[2:]))
 a["pin_power"], a["pin_ground"] = a["pin_power"].split(), a["pin_ground"].split()
 a["macro_halo"] = a["macro_halo"].split()
+# the layers whose straps become the supplies' block pins: the two strap layers, or none
+a["pdn_pins"] = [a["vstripe"].split(":")[0], a["hstripe"].split(":")[0]] if a["pdn_pins"] == "1" else []
 json.dump(a, open(sys.argv[1], "w"), indent=1)
 PY
 echo "pdk:     $PDK · $LIB · $(dirname "$(dirname "$TLEF")")"
@@ -282,12 +287,13 @@ if [ -n "$MACRO_GRID" ]; then
   IFS=: read -r MCELLS MH MV <<<"$MACRO_GRID"
   MGRID=(--grid "macro:macro:c=$MCELLS:$MH,$MV" --starts-with power --connect "$VL,$HL::::::::")
 fi
+PINS=(); [ "$PDN_PINS" = 1 ] && PINS=(--pins "$VL,$HL")
 "$PDN" generate "$OUT/5.connected.odb" --out-def "$OUT/6.floorplan.def" \
        --power "$POWER" --ground "$GROUND" --voltage-domains CORE --grid stdcell:core \
        --followpins "$RL:core:$RW" \
        --stripe "$VL:$VW:$VP:$VO:core:0:::::" \
        --stripe "$HL:$HW:$HP:$HO:core:0:::::" \
-       --connect "$RL,$VL::::::::" --connect "$VL,$HL::::::::" "${MGRID[@]}" --trim 1 \
+       --connect "$RL,$VL::::::::" --connect "$VL,$HL::::::::" "${MGRID[@]}" "${PINS[@]}" --trim 1 \
        > "$OUT/6.pdn.json" 2> "$OUT/6.pdn.log"
 sed 's/^/  /' "$OUT/6.pdn.log" "$OUT/6.pdn.json"
 
