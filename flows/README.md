@@ -91,6 +91,10 @@ route.sh      grt  ->  antenna repair  ->  dpl check  ->  drt  ->  write DEF  ->
 implement.sh  floorplan.sh  ->  place.sh  ->  route.sh
 ```
 
+`route.sh` can also repair timing on the global routes before detailed routing (rsz
+repair_timing, setup then hold, then legalize and route again). It is off by default, as the open
+flow ships it; `--grt-timing-repair` turns it on, on `route.sh` or `implement.sh`.
+
 ```sh
 ./flows/implement.sh --netlist build/my_block.v --die-area '0 0 400 400' \
                      --clock-port clk_i --clock-period 50 --skip-repair --ideal-clock

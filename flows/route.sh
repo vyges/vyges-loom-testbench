@@ -8,13 +8,14 @@
 #
 # Route a placed design with the Vyges Loom engines, repairing antennas on the way, then check it.
 #
-#     grt (route, then repair antennas)  ->  dpl check  ->  rsz repair_timing (on the global routes)
-#         ->  dpl legalize  ->  dpl check  ->  grt (route again)  ->  drt  ->  write DEF  ->  ant  ->  fill
+#     grt (route, then repair antennas)  ->  dpl check  ->  [rsz repair_timing (on the global routes)
+#         ->  dpl legalize  ->  dpl check  ->  grt (route again)]  ->  drt  ->  write DEF  ->  ant  ->  fill
 #
-# The timing repair runs as an open flow runs it after global routing: the design routed again
-# inside it and timed on those routes, setup paths first, then hold, each with a slack margin and a
-# cap on the buffers it may add; the cells it moved or added legalized, and the whole design routed
-# again for the detailed router. A design the repair declines goes on as the antenna repair left it.
+# The timing repair on the global routes is OFF by default, as an open flow ships it, and runs with
+# --grt-timing-repair: the design routed again inside it and timed on those routes, setup paths
+# first, then hold, each with a slack margin and a cap on the buffers it may add; the cells it moved
+# or added legalized, and the whole design routed again for the detailed router. A design the repair
+# declines goes on as the antenna repair left it.
 #
 # Antenna repair runs inside the global router, on its routes: jumpers first, then a diode beside
 # each gate still in violation, the diodes legalized onto the rows, and the nets they touched
@@ -44,7 +45,7 @@
 #   --signal-rc-layer L / --clock-rc-layer L    as in ./place.sh (default met2 / met5)
 #   --grt-setup-margin NS / --grt-hold-margin NS    the repair's slack margins (default 0.025 / 0.05)
 #   --grt-max-buffer-percent P   its cap on added buffers, percent of the instances (default 50)
-#   --skip-timing-repair  do not run rsz repair_timing after global routing
+#   --grt-timing-repair   run rsz repair_timing after global routing (default: off)
 #   --fill-cells 'PATTERNS'  masters to fill empty sites with, tried in order (names or globs;
 #                         default sky130 hd's decaps then fills)
 #   --no-fill             leave the empty sites empty
@@ -66,7 +67,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
 ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS= FILL=true
-SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=true
+SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=false
 FILL_CELLS='sky130_ef_sc_hd__decap_12 sky130_fd_sc_hd__decap_8 sky130_fd_sc_hd__decap_6 sky130_fd_sc_hd__decap_4 sky130_fd_sc_hd__decap_3 sky130_fd_sc_hd__fill*'
 MACRO_LEFS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
@@ -95,6 +96,8 @@ while [ $# -gt 0 ]; do
     --grt-setup-margin) GRT_SETUP_MARGIN=$2; shift 2 ;;
     --grt-hold-margin)  GRT_HOLD_MARGIN=$2; shift 2 ;;
     --grt-max-buffer-percent) GRT_MAX_BUF_PCT=$2; shift 2 ;;
+    --grt-timing-repair) TIMING_REPAIR=true; shift ;;
+    # the default since the repair went opt-in; kept so an older command line still runs
     --skip-timing-repair) TIMING_REPAIR=false; shift ;;
     --no-fill)    FILL=false; shift ;;
     --pdk)        PDK=$2; shift 2 ;;
@@ -158,9 +161,12 @@ fi
 # 1c ── timing repair on the global routes ─────────────────────────────────────────────────────
 DRT_IN=$OUT/r1.grt.odb GTRC=skipped
 [ -z "$SDC" ] && [ -f "$OUT/p0.design.sdc" ] && SDC=$OUT/p0.design.sdc
-if [ "$TIMING_REPAIR" = true ] && [ -z "$SDC" ]; then
+if [ "$TIMING_REPAIR" != true ]; then
+  step "1c · rsz repair_timing — off (the open flow's default; --grt-timing-repair runs it)"
+  GTRC="off"
+elif [ -z "$SDC" ]; then
   step "1c · rsz repair_timing — skipped: no constraints (--sdc)"
-elif [ "$TIMING_REPAIR" = true ]; then
+else
   step "1c · rsz repair_timing — setup, then hold, on the global routes"
   pdk_resolve
   dont_use_resolve
@@ -185,7 +191,7 @@ EOF
   if [ "$trc" -ne 0 ]; then
     # declined (a refusal, or a route or estimate it does not model): the design goes on as
     # the antenna repair left it, and the result says so
-    echo "  the timing repair did not run to the end (exit $trc); the design continues unrepaired (--skip-timing-repair skips the attempt)." >&2
+    echo "  the timing repair did not run to the end (exit $trc); the design continues unrepaired (leave out --grt-timing-repair to skip the attempt)." >&2
     GTRC="$GTRC (not applied)"
   else
     step "1d · dpl — the repaired cells onto legal sites"
