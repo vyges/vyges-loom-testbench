@@ -19,7 +19,8 @@
 #
 # Antenna repair runs inside the global router, on its routes: jumpers first, then a diode beside
 # each gate still in violation, the diodes legalized onto the rows, and the nets they touched
-# rerouted, repeated up to --antenna-iterations times. The defaults are the open flow's.
+# rerouted, repeated up to --antenna-iterations times. The defaults are the open flow's. Every step
+# that adds cells (diodes, buffers, fillers) ends by connecting their supply pins to the supply nets.
 #
 # The input is a placed design: the database ./place.sh writes, or any placed DEF. The output is
 # a routed database and DEF, and the same with every empty site filled — decap cells first, then
@@ -43,6 +44,9 @@
 #                         as ./place.sh writes it; with none the repair is skipped and says so)
 #   --macro-lib FILE      a hard macro's Liberty (repeatable), for the timing repair
 #   --signal-rc-layer L / --clock-rc-layer L    as in ./place.sh (default met2 / met5)
+#   --power NET / --ground NET      supply net names, for the cells this script adds (default VPWR / VGND)
+#   --pin-power RE / --pin-ground RE   repeatable cell-pin patterns, as ./floorplan.sh's
+#                         (default ^VPWR$ and ^VPB$ / ^VGND$ and ^VNB$)
 #   --grt-setup-margin NS / --grt-hold-margin NS    the repair's slack margins (default 0.025 / 0.05)
 #   --grt-max-buffer-percent P   its cap on added buffers, percent of the instances (default 50)
 #   --grt-timing-repair   run rsz repair_timing after global routing (default: off)
@@ -65,6 +69,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+POWER=VPWR GROUND=VGND PIN_POWER=() PIN_GROUND=()
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
 ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS= FILL=true
 SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=false
@@ -100,6 +105,10 @@ while [ $# -gt 0 ]; do
     # the default since the repair went opt-in; kept so an older command line still runs
     --skip-timing-repair) TIMING_REPAIR=false; shift ;;
     --no-fill)    FILL=false; shift ;;
+    --power)      POWER=$2; shift 2 ;;
+    --ground)     GROUND=$2; shift 2 ;;
+    --pin-power)  PIN_POWER+=("$2"); shift 2 ;;
+    --pin-ground) PIN_GROUND+=("$2"); shift 2 ;;
     --pdk)        PDK=$2; shift 2 ;;
     --library)    LIB=$2; shift 2 ;;
     --pdk-root)   export PDK_ROOT=$2; shift 2 ;;
@@ -111,7 +120,8 @@ while [ $# -gt 0 ]; do
 done
 . "$HERE/_common.sh"
 
-ODB=$(eng opendb); GRT=$(eng grt); DRT=$(eng drt); ANT=$(eng ant); DPL=$(eng dpl); RSZ=$(eng rsz)
+ODB=$(eng opendb); GRT=$(eng grt); DRT=$(eng drt); ANT=$(eng ant); DPL=$(eng dpl); RSZ=$(eng rsz); PDN=$(eng pdn)
+supply_rules
 mkdir -p "$OUT"
 if [ -n "$IN_DEF" ]; then
   [ -f "$IN_DEF" ] || { echo "error: no such DEF: $IN_DEF" >&2; exit 2; }
@@ -149,6 +159,7 @@ for l in r.get("log", []):
 if r.get("reason"): print(f"  {r['reason']}")
 PY
 [ "$rc" -eq 0 ] || exit "$rc"
+[ "$ANT_REPAIR" = true ] && supply_connect "$OUT/r1.grt.odb"
 
 # The diodes were legalized inside the repair; check every cell is still on a legal site.
 if [ "$ANT_REPAIR" = true ]; then
@@ -194,6 +205,7 @@ EOF
     echo "  the timing repair did not run to the end (exit $trc); the design continues unrepaired (leave out --grt-timing-repair to skip the attempt)." >&2
     GTRC="$GTRC (not applied)"
   else
+    supply_connect "$OUT/r1c.rt.odb"
     step "1d · dpl — the repaired cells onto legal sites"
     "$DPL" detailed-placement "$OUT/r1c.rt.odb" --out-odb "$OUT/r1d.legal.odb" \
            > "$OUT/r1d.dpl.json" 2> >(sed 's/^/  /' >&2)
@@ -251,6 +263,7 @@ if [ "$FILL" = true ]; then
   set -f; frc=0; "$DPL" filler-placement "$OUT/routed.odb" $FILL_CELLS --out-odb "$OUT/filled.odb" \
     > "$OUT/r5.fill.json" 2> >(sed 's/^/  /' >&2) || frc=$?; set +f
   [ "$frc" -eq 0 ] || exit "$frc"
+  supply_connect "$OUT/filled.odb"
   runq "$ODB" write-def --input "$OUT/filled.odb" --output "$OUT/filled.def"
 fi
 

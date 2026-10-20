@@ -16,7 +16,8 @@
 # placement: after global placement, after the clock tree and after the timing repair, every
 # clock propagated once the tree is built. The timing repair runs as an open flow runs it after
 # the clock tree: setup paths first, then hold, each with a slack margin and a cap on the buffers
-# it may add, and the cells it moved or added legalized after.
+# it may add, and the cells it moved or added legalized after. Every step that adds cells ends by
+# connecting their supply pins to the supply nets, as an open flow ends each of its steps.
 #
 # The input is a floorplan: the DEF ./floorplan.sh writes, or any DEF with rows, tracks and a
 # power grid. The output is a legal placement, as a database and a DEF, ready for ./route.sh.
@@ -41,6 +42,9 @@
 #   --macro-lib FILE      a hard macro's Liberty (repeatable), for every timing step
 #   --dont-use FILE       cells no engine may insert (rsz, cts): names or globs, whitespace-separated, '#' comments
 #                         (default: the PDK store's `dont_use` for the library, if it has one)
+#   --power NET / --ground NET      supply net names, for the cells this script adds (default VPWR / VGND)
+#   --pin-power RE / --pin-ground RE   repeatable cell-pin patterns, as ./floorplan.sh's
+#                         (default ^VPWR$ and ^VPB$ / ^VGND$ and ^VNB$)
 #   --skip-repair         do not run rsz repair_design
 #   --setup-margin NS / --hold-margin NS    timing repair's slack margins (default 0.05 / 0.1)
 #   --max-buffer-percent P  timing repair's cap on added buffers, percent of the instances (default 50)
@@ -61,7 +65,7 @@ IO_H=met3 IO_V=met2 SIG_RC=met2 CLK_RC=met5 SLEW=20 CAP=20
 CLKBUFS='sky130_fd_sc_hd__clkbuf_4 sky130_fd_sc_hd__clkbuf_8' ROOTBUF=sky130_fd_sc_hd__clkbuf_16
 SKIP_REPAIR=0 IDEAL_CLOCK=0 DENSITY= CLK_MAX_WL=0 DONT_USE_FILE=
 SETUP_MARGIN=0.05 HOLD_MARGIN=0.1 MAX_BUF_PCT=50 SKIP_TIMING_REPAIR=0
-MACRO_LEFS=() MACRO_LIBS=()
+MACRO_LEFS=() MACRO_LIBS=() POWER=VPWR GROUND=VGND PIN_POWER=() PIN_GROUND=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
 
 while [ $# -gt 0 ]; do
@@ -84,6 +88,10 @@ while [ $# -gt 0 ]; do
     --dont-use)     DONT_USE_FILE=$2; shift 2 ;;
     --macro-lef)    MACRO_LEFS+=("$2"); shift 2 ;;
     --macro-lib)    MACRO_LIBS+=("$2"); shift 2 ;;
+    --power)        POWER=$2; shift 2 ;;
+    --ground)       GROUND=$2; shift 2 ;;
+    --pin-power)    PIN_POWER+=("$2"); shift 2 ;;
+    --pin-ground)   PIN_GROUND+=("$2"); shift 2 ;;
     --skip-repair)  SKIP_REPAIR=1; shift ;;
     --setup-margin) SETUP_MARGIN=$2; shift 2 ;;
     --hold-margin)  HOLD_MARGIN=$2; shift 2 ;;
@@ -106,7 +114,8 @@ done
 if [ -z "$SDC" ] && { [ -z "$CLOCK_PORT" ] || [ -z "$CLOCK_PERIOD" ]; }; then
   echo "error: give --clock-port and --clock-period, or --sdc FILE." >&2; exit 2
 fi
-ODB=$(eng opendb); PPL=$(eng ppl); GPL=$(eng gpl); RSZ=$(eng rsz); DPL=$(eng dpl); CTS=$(eng cts)
+ODB=$(eng opendb); PPL=$(eng ppl); GPL=$(eng gpl); RSZ=$(eng rsz); DPL=$(eng dpl); CTS=$(eng cts); PDN=$(eng pdn)
+supply_rules
 pdk_resolve
 dont_use_resolve
 mkdir -p "$OUT"
@@ -188,6 +197,7 @@ fi
 # 4 ── legalization ──────────────────────────────────────────────────────────────────────────
 step "4 · dpl — every cell onto a legal site"
 def_to_odb "$PLACED" "$OUT/p4.global.odb"
+[ "$SKIP_REPAIR" = 1 ] || supply_connect "$OUT/p4.global.odb"
 "$DPL" detailed-placement "$OUT/p4.global.odb" --out-odb "$OUT/p4.legal.odb" \
        > "$OUT/p4.dpl.json" 2> >(sed 's/^/  /' >&2)
 echo "  $(jget "$OUT/p4.dpl.json" status): $(jget "$OUT/p4.dpl.json" moved) of $(jget "$OUT/p4.dpl.json" cells) cells moved ($(jget "$OUT/p4.dpl.json" legalizer) legalizer)"
@@ -208,6 +218,7 @@ cat > "$OUT/p6.cts.job.json" <<EOF
 EOF
 rc=0; "$CTS" clock_tree_synthesis "$OUT/p6.cts.job.json" -o "$OUT/p6.cts.json" 2>/dev/null || rc=$?
 echo "  cts: $(jget "$OUT/p6.cts.json" status) — $(jget "$OUT/p6.cts.json" clock_nets) clock nets found"
+[ "$rc" -ne 0 ] || supply_connect "$OUT/p6.cts.odb"
 if [ "$rc" -ne 0 ]; then
   echo "  $(jget "$OUT/p6.cts.json" reason)"
   if [ "$rc" -eq 3 ] && [ "$IDEAL_CLOCK" = 1 ]; then
@@ -239,6 +250,7 @@ EOF
   rrc=0; runq "$RSZ" repair_design "$OUT/p6b.rcn.job.json" -o "$OUT/p6b.rcn.json" || rrc=$?
   echo "  rsz: $(jget "$OUT/p6b.rcn.json" status) — $(jget "$OUT/p6b.rcn.json" inserted_buffers) buffers, $(jget "$OUT/p6b.rcn.json" nets_checked) clock drivers $(jget "$OUT/p6b.rcn.json" reason)"
   [ "$rrc" -eq 0 ] || exit "$rrc"
+  supply_connect "$OUT/p6b.rcn.odb"
   CLOCKED=$OUT/p6b.rcn.odb
 fi
 
@@ -288,6 +300,7 @@ EOF
   fi
 fi
 if [ "$rc" -eq 0 ] && [ "$SKIP_TIMING_REPAIR" = 0 ] && [ "$trc" -eq 0 ]; then
+  supply_connect "$OUT/p9.rt.odb"
   step "11 · dpl — the repaired cells onto legal sites"
   "$DPL" detailed-placement "$OUT/p9.rt.odb" --out-odb "$OUT/p10.legal.odb" \
          > "$OUT/p10.dpl.json" 2> >(sed 's/^/  /' >&2)

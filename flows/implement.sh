@@ -36,7 +36,7 @@ PLACE_FLAG=" --skip-repair --ideal-clock --skip-timing-repair "
 ROUTE_VAL=" --min-layer --max-layer --adjustment --diode-cell --antenna-iterations --antenna-margin --threads --fill-cells \
 --grt-setup-margin --grt-hold-margin --grt-max-buffer-percent "
 ROUTE_FLAG=" --no-congestion --no-antenna-repair --no-fill --grt-timing-repair "
-SHARED_VAL=" --pdk --library --pdk-root --bin --macro-lef "
+SHARED_VAL=" --pdk --library --pdk-root --bin --macro-lef --power --ground --pin-power --pin-ground "
 # Place and route both take these (floorplan inserts no cells).
 PR_VAL=" --dont-use "
 # timing.sh takes these of place.sh's, the shared ones, and the netlist.

@@ -129,6 +129,28 @@ macro_lib_steps() { local f; for f in "${MACRO_LIBS[@]+"${MACRO_LIBS[@]}"}"; do 
 # A database from LEF + DEF. The FIRST --lef creates the technology, so the tech LEF goes first.
 def_to_odb() { local m; mapfile -t m < <(macro_lef_args); runq "$ODB" import --lef "$TLEF" --lef "$CLEF" "${m[@]+"${m[@]}"}" --def "$1" --output "$2"; }
 
+# The supply connections a step that adds cells ends with, as an open flow ends every step
+# (`set_global_connections` when it writes its views: one add_global_connection per supply pin
+# pattern, every instance, then global_connect). A buffer, clock buffer, diode or filler added
+# after the power grid otherwise keeps its supply pins on no net. The rules are floorplan.sh's
+# step 5, from the same --power/--ground/--pin-power/--pin-ground and the same defaults.
+supply_rules() {
+  [ ${#PIN_POWER[@]}  -gt 0 ] || PIN_POWER=('^VPWR$' '^VPB$')
+  [ ${#PIN_GROUND[@]} -gt 0 ] || PIN_GROUND=('^VGND$' '^VNB$')
+  CONNECT=()
+  local re
+  for re in "${PIN_POWER[@]}";  do CONNECT+=(--connect "$POWER:$re:.*:power");   done
+  for re in "${PIN_GROUND[@]}"; do CONNECT+=(--connect "$GROUND:$re:.*:ground"); done
+}
+#   supply_connect DB   connect DB's unconnected supply pins, in place; report in DB's .gc.json
+supply_connect() {
+  local f=$1 tmp=${1%.odb}.gc.odb rep=${1%.odb}.gc.json
+  "$PDN" global-connect "$f" "${CONNECT[@]}" --out-odb "$tmp" > "$rep" 2> >(sed 's/^/  /' >&2) \
+    || { echo "error: global-connect on $f failed" >&2; exit 1; }
+  mv "$tmp" "$f"
+  echo "  supplies: $(jget "$rep" connections) pins connected"
+}
+
 # Read one top-level field of a JSON report.
 jget() { "$PY" -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if v is None else v)' "$1" "$2"; }
 
