@@ -47,6 +47,9 @@
 #   --power NET / --ground NET      supply net names, for the cells this script adds (default VPWR / VGND)
 #   --pin-power RE / --pin-ground RE   repeatable cell-pin patterns, as ./floorplan.sh's
 #                         (default ^VPWR$ and ^VPB$ / ^VGND$ and ^VNB$)
+#   --ignore-disconnected-module M   a cell or macro the disconnected-pin check skips (repeatable;
+#                         default on sky130: sky130_fd_sc_hd__conb_1, as an open flow's)
+#   --warn-disconnected-pins   report critical disconnected pins and go on (default: stop the flow)
 #   --grt-setup-margin NS / --grt-hold-margin NS    the repair's slack margins (default 0.025 / 0.05)
 #   --grt-max-buffer-percent P   its cap on added buffers, percent of the instances (default 50)
 #   --grt-timing-repair   run rsz repair_timing after global routing (default: off)
@@ -69,7 +72,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-POWER=VPWR GROUND=VGND PIN_POWER=() PIN_GROUND=()
+POWER=VPWR GROUND=VGND PIN_POWER=() PIN_GROUND=() DISC_IGNORE=() DISC_ERROR=true
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
 ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS= FILL=true
 SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=false
@@ -109,6 +112,8 @@ while [ $# -gt 0 ]; do
     --ground)     GROUND=$2; shift 2 ;;
     --pin-power)  PIN_POWER+=("$2"); shift 2 ;;
     --pin-ground) PIN_GROUND+=("$2"); shift 2 ;;
+    --ignore-disconnected-module) DISC_IGNORE+=("$2"); shift 2 ;;
+    --warn-disconnected-pins) DISC_ERROR=false; shift ;;
     --pdk)        PDK=$2; shift 2 ;;
     --library)    LIB=$2; shift 2 ;;
     --pdk-root)   export PDK_ROOT=$2; shift 2 ;;
@@ -255,6 +260,21 @@ ANT_RC=0; "$ANT" check "$OUT/routed.odb" -o "$OUT/r4.ant.json" 2>/dev/null || AN
 echo "  ant: $(jget "$OUT/r4.ant.json" status)"
 [ "$ANT_RC" -le 1 ] || exit "$ANT_RC"
 
+# 4b ── disconnected pins ─────────────────────────────────────────────────────────────────────
+# As an open flow checks the routed design before filling it: per instance, a supply pin, every
+# output or an input left on no net is critical, and a critical pin stops the flow.
+step "4b · opendb report-disconnected-pins — supply, output and input pins on no net"
+[ ${#DISC_IGNORE[@]} -gt 0 ] || case $PDK in sky130*) DISC_IGNORE=(sky130_fd_sc_hd__conb_1) ;; esac
+IGN=(); for m in "${DISC_IGNORE[@]+"${DISC_IGNORE[@]}"}"; do IGN+=(--ignore-module "$m"); done
+DISC_RC=0; "$ODB" report-disconnected-pins --input "$OUT/routed.odb" "${IGN[@]+"${IGN[@]}"}" \
+  > "$OUT/r4b.disconnected.json" 2> "$OUT/r4b.disconnected.log" || DISC_RC=$?
+DISC_CRIT=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["critical_disconnected_pin_count"])' "$OUT/r4b.disconnected.json" 2>/dev/null || echo "?")
+echo "  $(jget "$OUT/r4b.disconnected.json" disconnected_pin_count) disconnected, $DISC_CRIT critical"
+if [ "$DISC_RC" -ne 0 ]; then
+  sed -n '1,20s/^/  /p' "$OUT/r4b.disconnected.log" >&2
+  [ "$DISC_RC" -eq 1 ] && [ "$DISC_ERROR" = false ] || exit "$DISC_RC"
+fi
+
 # 5 ── fill ──────────────────────────────────────────────────────────────────────────────────
 if [ "$FILL" = true ]; then
   step "5 · dpl filler-placement — every empty site, decaps then fillers"
@@ -272,5 +292,6 @@ printf '  %-10s %s\n' \
   routing "$(jget "$OUT/r2.drt.json" status)" \
   "timing repair" "$GTRC" \
   antenna "$(jget "$OUT/r4.ant.json" status)" \
+  "disconnected pins" "$DISC_CRIT critical" \
   dont_use "$([ "$DONT_USE_FOUND" -eq 0 ] && echo clean || echo "$DONT_USE_FOUND excluded")"
-[ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] && [ "$DONT_USE_FOUND" -eq 0 ] || exit 1
+[ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] && [ "$DISC_RC" -eq 0 ] && [ "$DONT_USE_FOUND" -eq 0 ] || exit 1
