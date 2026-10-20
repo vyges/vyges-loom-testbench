@@ -87,13 +87,18 @@ one numbered step per engine, each reading what the last one wrote.
 
 ```text
 place.sh      io pins  ->  gpl  ->  rsz repair_design  ->  dpl legalize  ->  dpl check  ->  cts  ->  rsz repair_clock_nets  ->  dpl
-route.sh      grt  ->  antenna repair  ->  dpl check  ->  drt  ->  write DEF  ->  ant
+route.sh      grt  ->  antenna repair  ->  dpl check  ->  drt  ->  write DEF  ->  ant  ->  disconnected pins  ->  fill
 implement.sh  floorplan.sh  ->  place.sh  ->  route.sh
 ```
 
 `route.sh` can also repair timing on the global routes before detailed routing (rsz
 repair_timing, setup then hold, then legalize and route again). It is off by default, as the open
 flow ships it; `--grt-timing-repair` turns it on, on `route.sh` or `implement.sh`.
+
+Every step that adds cells (buffers, clock buffers, diodes, fillers) ends by connecting their supply
+pins to the supply nets, as the open flow ends each of its steps. The floorplan's straps become the
+supplies' block pins (`--no-pdn-pins` keeps them off), and `route.sh` stops on a critical disconnected
+pin before filling the design (`--warn-disconnected-pins` reports it and goes on).
 
 ```sh
 ./flows/implement.sh --netlist build/my_block.v --die-area '0 0 400 400' \
