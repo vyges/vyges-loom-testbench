@@ -9,7 +9,8 @@
 # Route a placed design with the Vyges Loom engines, repairing antennas on the way, then check it.
 #
 #     grt (route, then repair antennas)  ->  dpl check  ->  [rsz repair_timing (on the global routes)
-#         ->  dpl legalize  ->  dpl check  ->  grt (route again)]  ->  drt  ->  write DEF  ->  ant  ->  fill
+#         ->  dpl legalize  ->  dpl check  ->  grt (route again)]  ->  drt  ->  write DEF  ->  ant
+#         ->  disconnected pins  ->  wire length  ->  fill
 #
 # The timing repair on the global routes is OFF by default, as an open flow ships it, and runs with
 # --grt-timing-repair: the design routed again inside it and timed on those routes, setup paths
@@ -50,6 +51,10 @@
 #   --ignore-disconnected-module M   a cell or macro the disconnected-pin check skips (repeatable;
 #                         default on sky130: sky130_fd_sc_hd__conb_1, as an open flow's)
 #   --warn-disconnected-pins   report critical disconnected pins and go on (default: stop the flow)
+#   --wire-length-threshold UM   the longest routed wire allowed, in microns; above it the run fails
+#                         at the end, after filling (default: none — the length is reported and the
+#                         check skipped, as an open flow does when its PDK sets no threshold)
+#   --warn-long-wire      report a wire above the threshold without failing the run
 #   --grt-setup-margin NS / --grt-hold-margin NS    the repair's slack margins (default 0.025 / 0.05)
 #   --grt-max-buffer-percent P   its cap on added buffers, percent of the instances (default 50)
 #   --grt-timing-repair   run rsz repair_timing after global routing (default: off)
@@ -73,6 +78,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 POWER=VPWR GROUND=VGND PIN_POWER=() PIN_GROUND=() DISC_IGNORE=() DISC_ERROR=true
+WL_THRESHOLD='' WL_ERROR=true
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
 ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS= FILL=true
 SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=false
@@ -114,6 +120,8 @@ while [ $# -gt 0 ]; do
     --pin-ground) PIN_GROUND+=("$2"); shift 2 ;;
     --ignore-disconnected-module) DISC_IGNORE+=("$2"); shift 2 ;;
     --warn-disconnected-pins) DISC_ERROR=false; shift ;;
+    --wire-length-threshold) WL_THRESHOLD=$2; shift 2 ;;
+    --warn-long-wire) WL_ERROR=false; shift ;;
     --pdk)        PDK=$2; shift 2 ;;
     --library)    LIB=$2; shift 2 ;;
     --pdk-root)   export PDK_ROOT=$2; shift 2 ;;
@@ -275,6 +283,24 @@ if [ "$DISC_RC" -ne 0 ]; then
   [ "$DISC_RC" -eq 1 ] && [ "$DISC_ERROR" = false ] || exit "$DISC_RC"
 fi
 
+# 4c ── wire length ───────────────────────────────────────────────────────────────────────────
+# Every routed net's length, longest first (r4c.wire-length.csv), and the longest against
+# --wire-length-threshold. As an open flow's checker, a long wire does not stop the flow: the run
+# goes on to fill and fails at the end.
+step "4c · opendb report-wire-length — the longest routed wire$([ -n "$WL_THRESHOLD" ] && echo " against $WL_THRESHOLD µm")"
+WL_ARGS=(); [ -z "$WL_THRESHOLD" ] || WL_ARGS=(--threshold "$WL_THRESHOLD")
+WL_RC=0; "$ODB" report-wire-length --input "$OUT/routed.odb" --report-out "$OUT/r4c.wire-length.csv" \
+  "${WL_ARGS[@]+"${WL_ARGS[@]}"}" > "$OUT/r4c.wire-length.json" 2> "$OUT/r4c.wire-length.log" || WL_RC=$?
+WL_CHECK=$(jget "$OUT/r4c.wire-length.json" check 2>/dev/null || echo "?")
+# a report that did not run (an engine too old for these flags, a database it cannot read) is
+# not a long wire: anything but pass / fail / skipped stops the flow
+case "$WL_CHECK" in pass|fail|skipped) ;; *)
+  sed 's/^/  /' "$OUT/r4c.wire-length.log" >&2; echo "  wire-length report failed (exit $WL_RC)" >&2
+  exit $(( WL_RC > 1 ? WL_RC : 2 )) ;;
+esac
+echo "  longest $(jget "$OUT/r4c.wire-length.json" max_length_um) µm over $(jget "$OUT/r4c.wire-length.json" nets_with_wire) nets: $WL_CHECK"
+[ "$WL_RC" -eq 0 ] || [ "$WL_ERROR" = true ] || { WL_RC=0; WL_CHECK="$WL_CHECK (warning only)"; }
+
 # 5 ── fill ──────────────────────────────────────────────────────────────────────────────────
 if [ "$FILL" = true ]; then
   step "5 · dpl filler-placement — every empty site, decaps then fillers"
@@ -293,5 +319,6 @@ printf '  %-10s %s\n' \
   "timing repair" "$GTRC" \
   antenna "$(jget "$OUT/r4.ant.json" status)" \
   "disconnected pins" "$DISC_CRIT critical" \
+  "wire length" "$WL_CHECK" \
   dont_use "$([ "$DONT_USE_FOUND" -eq 0 ] && echo clean || echo "$DONT_USE_FOUND excluded")"
-[ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] && [ "$DISC_RC" -eq 0 ] && [ "$DONT_USE_FOUND" -eq 0 ] || exit 1
+[ "$DRT_RC" -eq 0 ] && [ "$ANT_RC" -eq 0 ] && [ "$DISC_RC" -eq 0 ] && [ "$WL_RC" -eq 0 ] && [ "$DONT_USE_FOUND" -eq 0 ] || exit 1
