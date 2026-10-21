@@ -8,10 +8,15 @@
 #
 # Route a placed design with the Vyges Loom engines, repairing antennas on the way, then check it.
 #
-#     grt (route, then repair antennas)  ->  dpl check  ->  [rsz repair_timing (on the global routes)
+#     [rsz repair_design (on the global routes)  ->  dpl legalize  ->  dpl check]
+#         ->  grt (route, then repair antennas)  ->  dpl check  ->  [rsz repair_timing (on the global routes)
 #         ->  dpl legalize  ->  dpl check  ->  grt (route again)]  ->  drt  ->  write DEF  ->  ant
 #         ->  disconnected pins  ->  wire length  ->  fill
 #
+# The design repair on the global routes is OFF by default, as an open flow ships it, and runs with
+# --grt-design-repair: slews, capacitances and fanout repaired on parasitics estimated from a global
+# route (no wire-length buffering unless --grt-design-max-wire-length), the cells legalized, then the
+# routing and antenna repair below — the open flow's order.
 # The timing repair on the global routes is OFF by default, as an open flow ships it, and runs with
 # --grt-timing-repair: the design routed again inside it and timed on those routes, setup paths
 # first, then hold, each with a slack margin and a cap on the buffers it may add; the cells it moved
@@ -58,6 +63,9 @@
 #   --grt-setup-margin NS / --grt-hold-margin NS    the repair's slack margins (default 0.025 / 0.05)
 #   --grt-max-buffer-percent P   its cap on added buffers, percent of the instances (default 50)
 #   --grt-timing-repair   run rsz repair_timing after global routing (default: off)
+#   --grt-design-repair   run rsz repair_design on the global routes before the antenna repair (default: off)
+#   --grt-design-max-wire-length UM / --grt-design-slew-margin PCT / --grt-design-cap-margin PCT
+#                         its settings (default 0 = no wire-length buffering / 10 / 10)
 #   --fill-cells 'PATTERNS'  masters to fill empty sites with, tried in order (names or globs;
 #                         default sky130 hd's decaps then fills)
 #   --no-fill             leave the empty sites empty
@@ -82,6 +90,7 @@ WL_THRESHOLD='' WL_ERROR=true
 IN_ODB= IN_DEF= MINL=met1 MAXL=met4 ADJ=0.3 CONGEST=true
 ANT_REPAIR=true DIODE= ANT_ITERS=3 ANT_MARGIN=10 DONT_USE_FILE= THREADS= FILL=true
 SDC= MACRO_LIBS=() SIG_RC=met2 CLK_RC=met5 GRT_SETUP_MARGIN=0.025 GRT_HOLD_MARGIN=0.05 GRT_MAX_BUF_PCT=50 TIMING_REPAIR=false
+DESIGN_REPAIR=false GRD_MAX_WIRE=0 GRD_SLEW_MARGIN=10 GRD_CAP_MARGIN=10
 FILL_CELLS='sky130_ef_sc_hd__decap_12 sky130_fd_sc_hd__decap_8 sky130_fd_sc_hd__decap_6 sky130_fd_sc_hd__decap_4 sky130_fd_sc_hd__decap_3 sky130_fd_sc_hd__fill*'
 MACRO_LEFS=()
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
@@ -111,6 +120,10 @@ while [ $# -gt 0 ]; do
     --grt-hold-margin)  GRT_HOLD_MARGIN=$2; shift 2 ;;
     --grt-max-buffer-percent) GRT_MAX_BUF_PCT=$2; shift 2 ;;
     --grt-timing-repair) TIMING_REPAIR=true; shift ;;
+    --grt-design-repair) DESIGN_REPAIR=true; shift ;;
+    --grt-design-max-wire-length) GRD_MAX_WIRE=$2; shift 2 ;;
+    --grt-design-slew-margin) GRD_SLEW_MARGIN=$2; shift 2 ;;
+    --grt-design-cap-margin) GRD_CAP_MARGIN=$2; shift 2 ;;
     # the default since the repair went opt-in; kept so an older command line still runs
     --skip-timing-repair) TIMING_REPAIR=false; shift ;;
     --no-fill)    FILL=false; shift ;;
@@ -144,6 +157,51 @@ fi
 [ -n "$IN_ODB" ] && [ -f "$IN_ODB" ] || { echo "error: --odb <placed.odb> or --def <placed.def> is required." >&2; exit 2; }
 step "routing $IN_ODB — layers $MINL..$MAXL"
 echo "engines: $(dirname "$GRT")"
+
+# 1a ── design repair on the global routes ──────────────────────────────────────────────────────
+# As the open flow's post-route design repair: routed, parasitics estimated from the routes,
+# repair_design, the cells legalized; the routing below starts from the legalized design.
+[ -z "$SDC" ] && [ -f "$OUT/p0.design.sdc" ] && SDC=$OUT/p0.design.sdc
+GRDRC=off
+if [ "$DESIGN_REPAIR" = true ] && [ -z "$SDC" ]; then
+  step "1a · rsz repair_design — skipped: no constraints (--sdc)"
+  GRDRC=skipped
+elif [ "$DESIGN_REPAIR" = true ]; then
+  step "1a · rsz repair_design — slew, capacitance and fanout on the global routes"
+  pdk_resolve
+  dont_use_resolve
+  cat > "$OUT/r1a.rd.job.json" <<EOF
+{"steps": [
+  {"cmd": "read_liberty", "args": ["$LIBERTY"]}, $(macro_lib_steps)$(dont_use_step)
+  {"cmd": "read_db", "args": ["$IN_ODB"]}, {"cmd": "read_sdc", "args": ["$SDC"]},
+  {"cmd": "set_wire_rc", "args": ["-signal", "-layer", "$SIG_RC"]},
+  {"cmd": "set_wire_rc", "args": ["-clock", "-layer", "$CLK_RC"]},
+  {"cmd": "set_propagated_clock", "args": []},
+  {"cmd": "set_routing_layers", "args": ["-signal", "$MINL-$MAXL", "-clock", "$MINL-$MAXL"]},
+  {"cmd": "set_global_routing_layer_adjustment", "args": ["*", "$ADJ"]},
+  {"cmd": "global_route", "args": []},
+  {"cmd": "estimate_parasitics", "args": ["-global_routing"]},
+  {"cmd": "repair_design", "args": ["-verbose", "-max_wire_length", "$GRD_MAX_WIRE", "-slew_margin", "$GRD_SLEW_MARGIN", "-cap_margin", "$GRD_CAP_MARGIN"]}],
+ "write_db": "$OUT/r1a.rd.odb"}
+EOF
+  drc=0; runq "$RSZ" repair_design "$OUT/r1a.rd.job.json" -o "$OUT/r1a.rd.json" || drc=$?
+  GRDRC=$(jget "$OUT/r1a.rd.json" status)
+  echo "  rsz: $GRDRC $(jget "$OUT/r1a.rd.json" reason)"
+  if [ "$drc" -ne 0 ]; then
+    echo "  the design repair did not run to the end (exit $drc); the design continues unrepaired (leave out --grt-design-repair to skip the attempt)." >&2
+    GRDRC="$GRDRC (not applied)"
+  else
+    supply_connect "$OUT/r1a.rd.odb"
+    step "1a · dpl — the repaired cells onto legal sites"
+    "$DPL" detailed-placement "$OUT/r1a.rd.odb" --out-odb "$OUT/r1a.legal.odb" \
+           > "$OUT/r1a.dpl.json" 2> >(sed 's/^/  /' >&2)
+    echo "  $(jget "$OUT/r1a.dpl.json" status): $(jget "$OUT/r1a.dpl.json" moved) of $(jget "$OUT/r1a.dpl.json" cells) cells moved"
+    rc=0; runq "$DPL" check-placement "$OUT/r1a.legal.odb" -o "$OUT/r1a.check.json" || rc=$?
+    echo "  $(jget "$OUT/r1a.check.json" status): $(jget "$OUT/r1a.check.json" violations) violations over $(jget "$OUT/r1a.check.json" cells_checked) cells"
+    [ "$rc" -eq 0 ] || exit "$rc"
+    IN_ODB=$OUT/r1a.legal.odb
+  fi
+fi
 
 # 1 ── global routing ────────────────────────────────────────────────────────────────────────
 step "1 · grt — route guides for every net$([ "$ANT_REPAIR" = true ] && echo ", then antenna repair")"
@@ -184,7 +242,6 @@ fi
 
 # 1c ── timing repair on the global routes ─────────────────────────────────────────────────────
 DRT_IN=$OUT/r1.grt.odb GTRC=skipped
-[ -z "$SDC" ] && [ -f "$OUT/p0.design.sdc" ] && SDC=$OUT/p0.design.sdc
 if [ "$TIMING_REPAIR" != true ]; then
   step "1c · rsz repair_timing — off (the open flow's default; --grt-timing-repair runs it)"
   GTRC="off"
@@ -316,6 +373,7 @@ fi
 step "result — $OUT/routed.odb (and routed.def$([ "$FILL" = true ] && echo "; filled.odb, filled.def"))"
 printf '  %-10s %s\n' \
   routing "$(jget "$OUT/r2.drt.json" status)" \
+  "design repair" "$GRDRC" \
   "timing repair" "$GTRC" \
   antenna "$(jget "$OUT/r4.ant.json" status)" \
   "disconnected pins" "$DISC_CRIT critical" \

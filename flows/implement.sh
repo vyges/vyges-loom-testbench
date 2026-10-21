@@ -34,8 +34,8 @@ PLACE_VAL=" --macro-lib --clock-port --clock-period --io-delay --sdc --density -
 --setup-margin --hold-margin --max-buffer-percent "
 PLACE_FLAG=" --skip-repair --ideal-clock --skip-timing-repair "
 ROUTE_VAL=" --ignore-disconnected-module --wire-length-threshold --min-layer --max-layer --adjustment --diode-cell --antenna-iterations --antenna-margin --threads --fill-cells \
---grt-setup-margin --grt-hold-margin --grt-max-buffer-percent "
-ROUTE_FLAG=" --no-congestion --no-antenna-repair --no-fill --grt-timing-repair --warn-disconnected-pins --warn-long-wire "
+--grt-setup-margin --grt-hold-margin --grt-max-buffer-percent --grt-design-max-wire-length --grt-design-slew-margin --grt-design-cap-margin "
+ROUTE_FLAG=" --no-congestion --no-antenna-repair --no-fill --grt-timing-repair --grt-design-repair --warn-disconnected-pins --warn-long-wire "
 SHARED_VAL=" --pdk --library --pdk-root --bin --macro-lef --power --ground --pin-power --pin-ground "
 # Place and route both take these (floorplan inserts no cells).
 PR_VAL=" --dont-use "
