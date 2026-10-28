@@ -38,7 +38,7 @@ jobs:
   deterministic:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install the Vyges CLI + Loom engines
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
@@ -60,15 +60,15 @@ jobs:
       - name: Render a real chip for the dashboard (best-effort)
         continue-on-error: true
         run: vyges-gds-view render fixtures/drc/edge_sensor_glue.gds --top edge_sensor_glue --png --width 380 -o chip.png
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: report-echo, path: report-echo.json }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: chip, path: chip.png, if-no-files-found: ignore }
 
   agentic:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install the Vyges CLI + Loom engines
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
@@ -84,7 +84,7 @@ jobs:
           python3 conformance.py cases.json --driver openai --model "$MODEL" \
             --report "report-agentic.json" | tee out.txt
           { echo "## Agentic — $MODEL"; echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: report-agentic, path: report-agentic.json }
 
   report:
@@ -97,16 +97,16 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with: { path: reports, merge-multiple: true }
       - name: Render the dashboard
         run: |
           python3 render_report.py --out site --chip reports/chip.png \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             reports/report-echo.json reports/report-agentic.json
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3
         with: { path: site }
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
