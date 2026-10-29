@@ -24,11 +24,11 @@
 # OPTIONS
 #   --rtl FILE            SystemVerilog source, in compile order (repeatable; required)
 #   --top NAME            the top module (required)
-#   --dont-use FILE       cells no engine may insert (default: the PDK's drc_exclude.cells)
-#   --synth-dont-use FILE cells synthesis may not map onto, besides --dont-use's (default: the PDK's
-#                         no_synth.cells) — the split an open flow makes
-#   --map FILE            the PDK's KLayout LEF/DEF layer map (default: libs.tech/klayout/tech/*.map)
-#   --lyt FILE            the PDK's KLayout technology (default: libs.tech/klayout/tech/*.lyt)
+#   --dont-use FILE       cells no engine may insert (default: the PDK descriptor's dont_use)
+#   --synth-dont-use FILE cells synthesis may not map onto, besides --dont-use's (default: the PDK
+#                         descriptor's synth_dont_use) — the split an open flow makes
+#   --map FILE            the PDK's KLayout LEF/DEF layer map (default: the descriptor's klayout_layer_map)
+#   --lyt FILE            the PDK's KLayout technology (default: the descriptor's klayout_tech)
 #   --no-xor              skip the KLayout stream-out and the XOR
 #   --out DIR             where to write (default ./build)
 #   --pdk / --library / --corner / --pdk-root / --bin    as in ./floorplan.sh
@@ -76,14 +76,22 @@ pdk_resolve
 STORE=${BIN:+$BIN/}vyges-pdk-store; [ -n "$BIN" ] || STORE=$(command -v vyges-pdk-store)
 CELL_GDS=$("$STORE" resolve "$PDK" gds --library "$LIB" 2>/dev/null | head -1) || true
 [ -f "${CELL_GDS:-}" ] || { echo "error: could not resolve the cell GDS for '$PDK' library $LIB: vyges pdk-store show $PDK" >&2; exit 2; }
-# The PDK directory the store resolved into: the open-flow and KLayout collateral live under it.
+# The excluded-cell lists and the KLayout files come from the PDK descriptor.
+res() { "$STORE" resolve "$PDK" "$@" 2>/dev/null | head -1 || true; }
+DONT_USE_FILE=${DONT_USE_FILE:-$(res dont_use --library "$LIB")}
+SYNTH_DONT_USE_FILE=${SYNTH_DONT_USE_FILE:-$(res synth_dont_use --library "$LIB")}
+MAP=${MAP:-$(res klayout_layer_map)}
+LYT=${LYT:-$(res klayout_tech)}
+# A descriptor registered before it carried these keys: look where the PDK tree keeps them
+# (`vyges pdk-store refresh` updates a registration copied from the catalog).
 PDKDIR=${TLEF%/libs.ref/*}
 first() { local f; for f in "$@"; do [ -f "$f" ] && { echo "$f"; return; }; done; }
-DONT_USE_FILE=${DONT_USE_FILE:-$(first "$PDKDIR/libs.tech/openlane/$LIB/drc_exclude.cells")}
-SYNTH_DONT_USE_FILE=${SYNTH_DONT_USE_FILE:-$(first "$PDKDIR/libs.tech/openlane/$LIB/no_synth.cells")}
+TECH=$PDKDIR/libs.tech
+DONT_USE_FILE=${DONT_USE_FILE:-$(first "$TECH/openlane/$LIB/drc_exclude.cells" "$TECH/librelane/$LIB/pnr_exclude.cells")}
+SYNTH_DONT_USE_FILE=${SYNTH_DONT_USE_FILE:-$(first "$TECH/openlane/$LIB/no_synth.cells" "$TECH/librelane/$LIB/synth_exclude.cells")}
 MAP=${MAP:-$(first "$PDKDIR"/libs.tech/klayout/tech/*.map)}
 LYT=${LYT:-$(first "$PDKDIR"/libs.tech/klayout/tech/*.lyt)}
-[ -f "${MAP:-}" ] || { echo "error: no KLayout layer map under $PDKDIR/libs.tech/klayout/tech; pass --map FILE" >&2; exit 2; }
+[ -f "${MAP:-}" ] || { echo "error: no KLayout layer map for '$PDK' (descriptor key klayout_layer_map); pass --map FILE" >&2; exit 2; }
 names() { [ -n "${1:-}" ] && sed 's/#.*//' "$1" | tr -s ' \t\n' ' ' | sed 's/^ //; s/ $//'; return 0; }
 
 mkdir -p "$OUT"
