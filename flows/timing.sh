@@ -91,6 +91,7 @@ fi
 STA=$(eng sta-si)
 pdk_resolve
 mkdir -p "$OUT"
+OUT=$(abspath "$OUT"); [ -n "$SDC" ] && SDC=$(abspath "$SDC")
 OUT=$(cd "$OUT" && pwd)
 if [ -n "$IN_ODB" ]; then
   # the placed database's netlist, as the timer reads a netlist

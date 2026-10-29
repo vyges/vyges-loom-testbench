@@ -90,6 +90,12 @@ that reaches it. Nine steps and three binaries, from `make-io-sites` through `rd
 238-pad flip-chip, 273 of 273 nets routed. Its exit status is the router's: leave a net unrouted
 and it writes the partial DEF, says so, and exits non-zero.
 
+[`flows/rtl-to-gds.sh`](./flows/rtl-to-gds.sh) goes the whole way, SystemVerilog to GDSII:
+synthesis, timing, floorplan, placement, clock tree, routing and stream-out, every stage a Loom
+engine. The routed design is then streamed out a second time with KLayout and the two GDSII files are
+XORed layer by layer; on the Ascon core of [vyges/ascon-crypto-ip](https://github.com/vyges/ascon-crypto-ip)
+([`flows/ascon-rtl-to-gds-demo.sh`](./flows/ascon-rtl-to-gds-demo.sh)) they are identical on all 41 layers.
+
 ## Coverage
 
 The read-only engines listed above run against bundled Apache-2.0 fixtures under [`fixtures/`](./fixtures).

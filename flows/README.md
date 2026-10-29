@@ -159,6 +159,56 @@ to end on this block. It is exercised on placed designs that come from a full pl
 Every engine logs through one path: `VYGES_LOG` (`trace|debug|info|warn|error`) sets the level and
 `VYGES_LOG_FORMAT` (`text|json`) the rendering. `VYGES_LOG=debug` adds each stage's own counters.
 
+## [`rtl-to-gds.sh`](./rtl-to-gds.sh) — RTL to GDSII, checked by a second writer
+
+The whole way, from SystemVerilog to a GDSII file a foundry takes:
+
+```text
+synthesize  ->  implement.sh (timing, floorplan, place, route)  ->  write-gds  ->  KLayout stream-out  ->  XOR
+```
+
+Synthesis is `syn`, every stage after it is a Loom engine, and the GDSII is written by `vyges opendb
+write-gds`: the routed design's instances as references into the standard-cell GDS, its wires, vias
+and pins on the PDK's layer map, and a label on every pin. Then the same routed DEF is streamed out a
+second time the way an open flow streams it out, with KLayout, and the two files are compared layer by
+layer, flattened, labels included. The run exits 1 unless they are identical: two writers that share no
+code drawing the same mask is the check an open flow trusts for its own stream-out.
+
+```sh
+./flows/rtl-to-gds.sh --rtl rtl/pkg.sv --rtl rtl/top.sv --top my_block \
+                      --die-area '0 0 400 400' --clock-port clk_i --clock-period 20
+```
+
+The cells no engine may use come from the PDK, split the way an open flow splits them: synthesis
+leaves out both `no_synth.cells` and `drc_exclude.cells`, and the stages after it leave out
+`drc_exclude.cells` (`--dont-use` and `--synth-dont-use` name other lists). The layer map and the
+KLayout technology are the PDK's own, from `libs.tech/klayout/tech`. The XOR needs the KLayout Python
+module (`pip install klayout`); `--no-xor` stops after `write-gds`.
+
+A design that routes with findings standing — antenna violations the repair could not clear, say — is
+still a layout, so it is streamed out and compared all the same; the route result above says what
+stands and the run exits 1 for it, as `route.sh` does.
+
+### On a public design
+
+[`ascon-rtl-to-gds-demo.sh`](./ascon-rtl-to-gds-demo.sh) runs it on the Ascon-AEAD128 core of
+[vyges/ascon-crypto-ip](https://github.com/vyges/ascon-crypto-ip), on sky130A:
+
+```sh
+git clone https://github.com/vyges/ascon-crypto-ip
+git -C ascon-crypto-ip checkout 77215bc
+./flows/ascon-rtl-to-gds-demo.sh --repo ascon-crypto-ip
+```
+
+From RTL to GDSII in 20 minutes on a 16-thread Linux machine. Synthesis maps it onto 8,279 cells; the
+520 µm die is placed and routed with 10,225 nets, detailed routing ending at zero design-rule markers
+after 17 iterations, 537 antenna diodes inserted on the way and 19,345 fillers after it. `write-gds`
+writes 33,469 instances, 417,908 shapes and 930 pin labels in about two seconds, and the KLayout stream-out
+of the same DEF is identical to it on all 41 layers.
+
+The run ends with exit 1, and says why: 41 of 9,988 nets still break an antenna rule after three repair
+passes. The GDSII is written and compared regardless.
+
 ## License
 
 These scripts are Apache-2.0 — see [LICENSE](../LICENSE) and [NOTICE](../NOTICE).

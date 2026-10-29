@@ -149,6 +149,7 @@ done
 ODB=$(eng opendb); GRT=$(eng grt); DRT=$(eng drt); ANT=$(eng ant); DPL=$(eng dpl); RSZ=$(eng rsz); PDN=$(eng pdn)
 supply_rules
 mkdir -p "$OUT"
+OUT=$(abspath "$OUT"); [ -n "$SDC" ] && SDC=$(abspath "$SDC")
 if [ -n "$IN_DEF" ]; then
   [ -f "$IN_DEF" ] || { echo "error: no such DEF: $IN_DEF" >&2; exit 2; }
   pdk_resolve

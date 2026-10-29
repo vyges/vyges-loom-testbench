@@ -119,6 +119,7 @@ supply_rules
 pdk_resolve
 dont_use_resolve
 mkdir -p "$OUT"
+OUT=$(abspath "$OUT"); [ -n "$SDC" ] && SDC=$(abspath "$SDC")
 DESIGN=$(awk '/^DESIGN /{print $2; exit}' "$DEF")
 step "$DESIGN — placement, from $DEF"
 echo "pdk:     $PDK · $LIB · $CORNER"

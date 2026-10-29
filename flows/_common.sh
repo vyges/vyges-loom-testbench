@@ -21,6 +21,11 @@ for c in python3 python; do
 done
 [ -n "$PY" ] || { echo "error: no python3 (>= 3.8) on PATH; the engines do not need it, the glue steps of this script do." >&2; exit 2; }
 
+# An existing file or directory as an absolute path. The paths a script writes into an engine's
+# job or Tcl are read by that engine from ITS working directory, not the script's: a relative
+# --out of build became build/build/p0.design.sdc for the placement timer.
+abspath() { case $1 in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$(cd "$(dirname "$1")" && pwd)" "$(basename "$1")" ;; esac; }
+
 # Resolve every engine once and say where it came from: a flow that silently picks up a different
 # build than the reader expects is the hardest kind of difference to chase.
 eng() {
