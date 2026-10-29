@@ -29,13 +29,14 @@
 #                         descriptor's synth_dont_use) — the split an open flow makes
 #   --map FILE            the PDK's KLayout LEF/DEF layer map (default: the descriptor's klayout_layer_map)
 #   --lyt FILE            the PDK's KLayout technology (default: the descriptor's klayout_tech)
+#   --oasis               also write the design as OASIS ($OUT/<top>.oas), XORed like the GDS
 #   --no-xor              skip the KLayout stream-out and the XOR
 #   --out DIR             where to write (default ./build)
 #   --pdk / --library / --corner / --pdk-root / --bin    as in ./floorplan.sh
 #   ...every other option goes to ./implement.sh (--die-area, --clock-port, --clock-period, ...)
 #
-# EXIT STATUS: 0 written, routed clean and identical to the KLayout stream-out · 1 the two GDS
-# files differ, or the design routed with findings standing (it is still streamed out and compared)
+# EXIT STATUS: 0 written, routed clean and identical to the KLayout stream-out · 1 the GDS (or
+# the OASIS) differs from it, or the design routed with findings standing (it is still streamed out and compared)
 # · 2 bad input or a missing tool · anything else, the failing stage's own status.
 #
 # The XOR needs the KLayout Python module: pip install klayout. Without it the run stops after
@@ -45,7 +46,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
-RTL=() TOP= DONT_USE_FILE= SYNTH_DONT_USE_FILE= MAP= LYT= XOR=1 IMPL=()
+RTL=() TOP= DONT_USE_FILE= SYNTH_DONT_USE_FILE= MAP= LYT= XOR=1 OASIS=0 IMPL=()
 while [ $# -gt 0 ]; do
   case $1 in
     --rtl)            RTL+=("$2"); shift 2 ;;
@@ -55,6 +56,7 @@ while [ $# -gt 0 ]; do
     --map)            MAP=$2; shift 2 ;;
     --lyt)            LYT=$2; shift 2 ;;
     --no-xor)         XOR=0; shift ;;
+    --oasis)          OASIS=1; shift ;;
     --out)            OUT=$2; shift 2 ;;
     --pdk)            PDK=$2; IMPL+=("$1" "$2"); shift 2 ;;
     --library)        LIB=$2; IMPL+=("$1" "$2"); shift 2 ;;
@@ -121,6 +123,12 @@ ROUTE_NOTE=; [ "$IMPL_RC" = 0 ] || ROUTE_NOTE="; routed with findings standing, 
 banner "write-gds — the routed design as GDSII"
 GDS=$OUT/$TOP.gds
 runq "$ODB" write-gds --lef "$TLEF" --lef "$CLEF" --def "$DEF" --map "$MAP" --gds "$CELL_GDS" --output "$GDS"
+if [ "$OASIS" = 1 ]; then
+  banner "write-gds — the same design as OASIS"
+  OAS=$OUT/$TOP.oas
+  runq "$ODB" write-gds --lef "$TLEF" --lef "$CLEF" --def "$DEF" --map "$MAP" --gds "$CELL_GDS" --output "$OAS"
+  GDS="$GDS and $OAS"
+fi
 
 if [ "$XOR" = 1 ]; then
   if ! "$PY" -c 'import klayout.db' 2>/dev/null; then
@@ -132,8 +140,13 @@ if [ "$XOR" = 1 ]; then
   REF=$OUT/$TOP.klayout.gds
   runq "$PY" "$HERE/klayout-stream-out.py" --def "$DEF" --lef "$TLEF" --lef "$CLEF" --gds "$CELL_GDS" \
     --lyt "$LYT" --map "$MAP" --top "$TOP" -o "$REF"
-  banner "XOR — $GDS against $REF"
-  rc=0; runq "$PY" "$HERE/gds-xor.py" "$GDS" "$REF" || rc=$?
+  banner "XOR — $OUT/$TOP.gds against $REF"
+  rc=0; runq "$PY" "$HERE/gds-xor.py" "$OUT/$TOP.gds" "$REF" || rc=$?
+  if [ "$OASIS" = 1 ]; then
+    banner "XOR — $OAS against $REF"
+    orc=0; runq "$PY" "$HERE/gds-xor.py" "$OAS" "$REF" || orc=$?
+    [ "$rc" = 0 ] && rc=$orc
+  fi
   banner "done in $(( $(date +%s) - T0 )) s — $GDS ($([ $rc = 0 ] && echo "identical to the KLayout stream-out" || echo "DIFFERS from the KLayout stream-out")$ROUTE_NOTE)"
   [ "$rc" != 0 ] && exit "$rc"
   exit "$IMPL_RC"
