@@ -322,7 +322,7 @@ dont_use_check "$OUT/routed.def"
 
 # 4 ── antenna ───────────────────────────────────────────────────────────────────────────────
 step "4 · ant — antenna ratios on the routed metal"
-ANT_RC=0; "$ANT" check "$OUT/routed.odb" -o "$OUT/r4.ant.json" 2>/dev/null || ANT_RC=$?
+ANT_RC=0; runq "$ANT" check "$OUT/routed.odb" -o "$OUT/r4.ant.json" || ANT_RC=$?
 echo "  ant: $(jget "$OUT/r4.ant.json" status)"
 [ "$ANT_RC" -le 1 ] || exit "$ANT_RC"
 

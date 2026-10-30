@@ -217,7 +217,7 @@ cat > "$OUT/p6.cts.job.json" <<EOF
            {"cmd": "clock_tree_synthesis", "args": ["-root_buf", "$ROOTBUF", "-buf_list", "$CLKBUFS"]}],
  "write_db": "$OUT/p6.cts.odb"}
 EOF
-rc=0; "$CTS" clock_tree_synthesis "$OUT/p6.cts.job.json" -o "$OUT/p6.cts.json" 2>/dev/null || rc=$?
+rc=0; runq "$CTS" clock_tree_synthesis "$OUT/p6.cts.job.json" -o "$OUT/p6.cts.json" || rc=$?
 echo "  cts: $(jget "$OUT/p6.cts.json" status) — $(jget "$OUT/p6.cts.json" clock_nets) clock nets found"
 [ "$rc" -ne 0 ] || supply_connect "$OUT/p6.cts.odb"
 if [ "$rc" -ne 0 ]; then
