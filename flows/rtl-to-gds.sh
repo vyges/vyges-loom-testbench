@@ -8,13 +8,17 @@
 #
 # RTL to GDS with the Vyges Loom engines, the stream-out checked by a second writer.
 #
-#     synthesize  ->  implement.sh (timing, floorplan, place, route)  ->  write-gds
+#     synthesize  ->  implement.sh (timing, floorplan, place, route)  ->  stream-out.sh
 #                                                                     ->  KLayout stream-out  ->  XOR
 #
 # Synthesis is `vyges physical syn`, every stage after it a Loom engine, and the GDS is written by
-# `vyges opendb write-gds`. Then the routed DEF is streamed out a second time the way an open flow
+# ./stream-out.sh: `vyges opendb color-masks` on a multi-patterned technology (a shape left
+# uncoloured is REFUSED), then `vyges opendb write-gds`, then `vyges opendb check-gds-layers` on
+# the layout written. Then the routed DEF is streamed out a second time the way an open flow
 # streams it out, with KLayout, and the two GDS files are compared layer by layer: the run exits 1
 # unless they are identical. Two writers that share no code drawing the same mask is the check.
+# On a multi-patterned technology the KLayout cross-check is skipped, and says so: it streams the
+# DEF, and the database's DEF writer does not yet write every coloured wire so a DEF reader takes it.
 #
 #   ./flows/rtl-to-gds.sh --rtl rtl/pkg.sv --rtl rtl/top.sv --top my_block \
 #                         --die-area '0 0 400 400' --clock-port clk_i --clock-period 20
@@ -30,6 +34,9 @@
 #   --map FILE            the PDK's KLayout LEF/DEF layer map (default: the descriptor's klayout_layer_map)
 #   --lyt FILE            the PDK's KLayout technology (default: the descriptor's klayout_tech)
 #   --oasis               also write the design as OASIS ($OUT/<top>.oas), XORed like the GDS
+#   --allowed-pairs FILE  the foundry's allowed GDS layer/datatype pairs, one `L D` per line: map
+#                         targets outside it are dropped, and the layout is checked against it
+#                         (a pair off the list is REFUSED, exit 3); see ./stream-out.sh
 #   --no-xor              skip the KLayout stream-out and the XOR
 #   --out DIR             where to write (default ./build)
 #   --pdk / --library / --corner / --pdk-root / --bin    as in ./floorplan.sh
@@ -37,7 +44,9 @@
 #
 # EXIT STATUS: 0 written, routed clean and identical to the KLayout stream-out · 1 the GDS (or
 # the OASIS) differs from it, or the design routed with findings standing (it is still streamed out and compared)
-# · 2 bad input or a missing tool · anything else, the failing stage's own status.
+# · 2 bad input or a missing tool · 3 REFUSED by a tapeout check of ./stream-out.sh (an uncoloured
+# shape on a multi-patterned layer, a pair off --allowed-pairs) · anything else, the failing
+# stage's own status.
 #
 # The XOR needs the KLayout Python module: pip install klayout. Without it the run stops after
 # write-gds and says so, unless --no-xor was given.
@@ -46,7 +55,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 PDK=${VYGES_PDK:-sky130a} LIB=sky130_fd_sc_hd CORNER=tt_025C_1v80 OUT=build BIN=${VYGES_BIN:-}
-RTL=() TOP= DONT_USE_FILE= SYNTH_DONT_USE_FILE= MAP= LYT= XOR=1 OASIS=0 IMPL=()
+RTL=() TOP= DONT_USE_FILE= SYNTH_DONT_USE_FILE= MAP= LYT= XOR=1 OASIS=0 IMPL=() ALLOWED=
 while [ $# -gt 0 ]; do
   case $1 in
     --rtl)            RTL+=("$2"); shift 2 ;;
@@ -57,6 +66,7 @@ while [ $# -gt 0 ]; do
     --lyt)            LYT=$2; shift 2 ;;
     --no-xor)         XOR=0; shift ;;
     --oasis)          OASIS=1; shift ;;
+    --allowed-pairs)  ALLOWED=$2; shift 2 ;;
     --out)            OUT=$2; shift 2 ;;
     --pdk)            PDK=$2; IMPL+=("$1" "$2"); shift 2 ;;
     --library)        LIB=$2; IMPL+=("$1" "$2"); shift 2 ;;
@@ -120,16 +130,30 @@ IMPL_RC=0
 DEF=$OUT/filled.def; [ -f "$DEF" ] || DEF=$OUT/routed.def
 ROUTE_NOTE=; [ "$IMPL_RC" = 0 ] || ROUTE_NOTE="; routed with findings standing, see the route result above"
 
-banner "write-gds — the routed design as GDSII"
+# The stream-out: colour (on a multi-patterned technology), write, check. Exit 1 there is colour
+# findings standing (still a layout, as with the route's); 3 is a refusal and stops the run.
+stream() {
+  local rc=0
+  "$HERE/stream-out.sh" --lef "$TLEF" --lef "$CLEF" --def "$DEF" --map "$MAP" --gds "$CELL_GDS" \
+    ${ALLOWED:+--allowed-pairs "$ALLOWED"} ${BIN:+--bin "$BIN"} --output "$1" || rc=$?
+  [ "$rc" -le 1 ] || exit "$rc"
+  [ "$rc" = 0 ] || { IMPL_RC=1; ROUTE_NOTE="$ROUTE_NOTE; colour findings standing, see ${1%.*}.color-masks.json"; }
+}
+banner "stream-out — the routed design as GDSII"
 GDS=$OUT/$TOP.gds
-runq "$ODB" write-gds --lef "$TLEF" --lef "$CLEF" --def "$DEF" --map "$MAP" --gds "$CELL_GDS" --output "$GDS"
+stream "$GDS"
+MULTI=0; [ "$(jget "$OUT/$TOP.color-masks.json" status)" = no_multi_mask_layers ] || MULTI=1
 if [ "$OASIS" = 1 ]; then
-  banner "write-gds — the same design as OASIS"
+  banner "stream-out — the same design as OASIS"
   OAS=$OUT/$TOP.oas
-  runq "$ODB" write-gds --lef "$TLEF" --lef "$CLEF" --def "$DEF" --map "$MAP" --gds "$CELL_GDS" --output "$OAS"
+  stream "$OAS"
   GDS="$GDS and $OAS"
 fi
 
+if [ "$XOR" = 1 ] && [ "$MULTI" = 1 ]; then
+  echo "note: KLayout cross-check skipped: the technology is multi-patterned and the cross-check streams the DEF, whose writer does not yet write every coloured wire so that a DEF reader takes it; the layout was checked by check-gds-layers instead"
+  XOR=0
+fi
 if [ "$XOR" = 1 ]; then
   if ! "$PY" -c 'import klayout.db' 2>/dev/null; then
     echo "error: the XOR needs the KLayout Python module: $PY -m pip install klayout (or pass --no-xor)" >&2
