@@ -11,7 +11,7 @@
 The open-flow recipe, step for step: load the PDK's KLayout technology; read the DEF with the
 LEFs and the LEF/DEF layer map (no net, instance or pin properties); clear every cell but the
 top and the via cells; read the standard-cell GDS into the cleared cells; copy the top cell's
-tree into a fresh layout; refuse when a cell is left with no GDS; write it.
+tree into a fresh layout; refuse when a placed cell is left with no GDS (or empty); write it.
 
     klayout-stream-out.py --def routed.def --lef tech.lef --lef cells.lef --gds cells.gds \
                           --lyt sky130A.lyt --map sky130A.map --top my_block -o my_block.gds
@@ -56,11 +56,24 @@ def main() -> int:
         print(f"error: the DEF has no cell '{a.top}'", file=sys.stderr)
         return 1
     # The LEF macros become empty cells for the cell GDS to fill; the via cells keep their shapes.
+    cleared = []
     for c in layout.each_cell():
         if c.cell_index() != top.cell_index() and not c.name.startswith("VIA"):
             c.clear()
+            cleared.append(c.cell_index())
+    # The cell GDS is read INTO those cells. A cleared cell is not a ghost cell, so the default
+    # conflict resolution would bring each GDS cell in under a new name and leave the macro the
+    # design places empty.
+    gopts = kdb.LoadLayoutOptions()
+    gopts.cell_conflict_resolution = kdb.LoadLayoutOptions.CellConflictResolution.AddToCell
     for g in a.gds:
-        layout.read(g, opts)
+        layout.read(g, gopts)
+    used = set(top.called_cells())
+    empty = [layout.cell(i).name for i in cleared if i in used and layout.cell(i).is_empty()]
+    for n in empty:
+        print(f"error: cell '{n}' is empty after reading the cell GDS", file=sys.stderr)
+    if empty:
+        return 1
 
     out = kdb.Layout()
     out.dbu = layout.dbu
