@@ -32,6 +32,8 @@
 #   --gds FILE            cell library GDS or OASIS (repeatable; required)
 #   --output FILE         the layout to write, .gds or .oas (required)
 #   --allowed-pairs FILE  the allowed layer/datatype pairs (see above)
+#   --colour-options FILE more color-masks options, one per line (# comments), e.g. a sign-off
+#                         deck's line-end windows: --eol-window M2:80,80,20,32,toeol
 #   --bin DIR             where the engines are (default: PATH)
 #
 # Next to --output it writes <name>.routed.odb, <name>.coloured.odb (when anything was coloured),
@@ -46,7 +48,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-LEFS=() DEF= MAP= CELLS=() OUTPUT= ALLOWED= BIN=${VYGES_BIN:-}
+LEFS=() DEF= MAP= CELLS=() OUTPUT= ALLOWED= BIN=${VYGES_BIN:-} COLOUR_OPTS=()
 while [ $# -gt 0 ]; do
   case $1 in
     --lef)           LEFS+=("$2"); shift 2 ;;
@@ -55,6 +57,11 @@ while [ $# -gt 0 ]; do
     --gds)           CELLS+=("$2"); shift 2 ;;
     --output)        OUTPUT=$2; shift 2 ;;
     --allowed-pairs) ALLOWED=$2; shift 2 ;;
+    --colour-options)
+      [ -f "$2" ] || { echo "error: --colour-options: no file $2" >&2; exit 2; }
+      while read -r -a words; do
+        [ ${#words[@]} -eq 0 ] || [ "${words[0]:0:1}" = "#" ] || COLOUR_OPTS+=("${words[@]}")
+      done < <(sed 's/#.*//' "$2"); shift 2 ;;
     --bin)           BIN=$2; shift 2 ;;
     -h|--help)
       awk '!/^#/ && NR>1 {exit} /SPDX|©|licensed under the Apache|apache[.]org/ {next} NR>1 {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" | sed '/./,$!d'; exit 0 ;;
@@ -86,7 +93,7 @@ runq "$ODB" import "${LEF_ARGS[@]}" --def "$DEF" --output "$BASE.routed.odb"
 # The colour step refuses (exit 3) a shape it leaves uncoloured; that ends the run here.
 rc=0
 "$ODB" color-masks --input "$BASE.routed.odb" --output "$BASE.coloured.odb" --lef "${LEFS[0]}" \
-  --require-coloured --report "$BASE.color-masks.json" > /dev/null 2> >(sed 's/^/  /' >&2) || rc=$?
+  ${COLOUR_OPTS[@]+"${COLOUR_OPTS[@]}"} --require-coloured --report "$BASE.color-masks.json" > /dev/null 2> >(sed 's/^/  /' >&2) || rc=$?
 if [ "$rc" = 3 ]; then
   echo "REFUSED: a shape on a multi-patterned layer has no mask colour; see $BASE.color-masks.json" >&2
   exit 3
